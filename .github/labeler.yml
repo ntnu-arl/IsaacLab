@@ -9,12 +9,9 @@ documentation:
     - changed-files:
       - any-glob-to-any-file:
         - 'docs/**'
-      - all-globs-to-all-files:
-        - '!docs/licenses/**'
-  - any:
-    - changed-files:
-      - any-glob-to-any-file:
         - '**/README.md'
+      - all-globs-to-all-files:
+        - '!docs/licenses/**'      
 
 # Infrastructure changes
 infrastructure:
@@ -62,15 +59,11 @@ isaac-lab:
     - changed-files:
       - any-glob-to-any-file:
         - source/**
+        - scripts/**
       - all-globs-to-all-files:
         - '!source/isaaclab_assets/**'
         - '!source/isaaclab_mimic/**'
         - '!source/isaaclab/isaaclab/devices'
-  - all:
-    - changed-files:
-      - any-glob-to-any-file:
-        - scripts/**
-      - all-globs-to-all-files:
         - '!scripts/imitation_learning/**'
 
 # Add 'enhancement' label to any PR where the head branch name
