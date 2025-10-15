@@ -487,21 +487,20 @@ class Multirotor(Articulation):
     
     
     def _set_thruster_forces_to_buffers(self):
-        """Set thruster forces into external force buffers based on the configured mode."""
+        """Set thruster forces using composable wrench API based on the configured mode."""
         if self.cfg.force_application_mode == "individual":
-            self._set_individual_thruster_forces()
+            self._set_individual_thruster_forces_composable()
         elif self.cfg.force_application_mode == "combined":
             self._set_combined_wrench()
         else:
             raise ValueError(f"Unknown force application mode: {self.cfg.force_application_mode}")
     
-    def _set_individual_thruster_forces(self):
-        """Set individual thruster forces using the external force API."""
-        # Prepare forces and torques for all thruster bodies
-        thruster_body_ids = []
-        forces_list = []
-        torques_list = []
+    def _set_individual_thruster_forces_composable(self):
+        """Set individual thruster forces using the NEW composable wrench API from PR #3287."""
+        # Reset the wrench composer at the start
+        self.reset_composable_force_and_torque()
         
+        # Add forces for each thruster using the composable API
         for actuator_name, actuator in self.actuators.items():
             if not isinstance(actuator, Thruster):
                 continue
@@ -513,9 +512,8 @@ class Multirotor(Articulation):
             
             for i, thruster_name in enumerate(actuator.thruster_names):
                 body_idx = body_indices[i]
-                thruster_body_ids.append(body_idx)
                 
-                force_magnitude = thruster_forces[:, i]  # (num_envs,)
+                force_magnitude = thruster_forces[:, i]
                 torque_magnitude = force_magnitude * actuator.cfg.torque_to_thrust_ratio
                 
                 # Force in local frame (along Z-axis)
@@ -523,7 +521,7 @@ class Multirotor(Articulation):
                     self.cfg.thruster_force_direction, device=self.device
                 ).expand(self.num_instances, -1)
                 
-                local_force = local_force_dir * force_magnitude.unsqueeze(-1)  # (num_envs, 3)
+                local_force = local_force_dir * force_magnitude.unsqueeze(-1)
                 
                 # Torque in local frame (around Z-axis)
                 rotor_direction = 1.0
@@ -532,24 +530,26 @@ class Multirotor(Articulation):
                 
                 local_torque = local_force_dir * torque_magnitude.unsqueeze(-1) * rotor_direction
                 
-                forces_list.append(local_force)
-                torques_list.append(local_torque)
+                # Add this thruster's force using composable API
+                # Shape needs to be (num_envs, 1, 3) for single body
+                self.add_composable_force_and_torque(
+                    forces=local_force.unsqueeze(1),      # (num_envs, 1, 3)
+                    torques=local_torque.unsqueeze(1),    # (num_envs, 1, 3)
+                    body_ids=[body_idx],                   # Single body
+                    env_ids=None,                          # All environments
+                    is_global=False                        # Local frame
+                )
         
-        # Stack forces and torques: shape (num_envs, num_thrusters, 3)
-        all_forces = torch.stack(forces_list, dim=1)
-        all_torques = torch.stack(torques_list, dim=1)
-        
-        # Use the base class API to set external forces
-        self.set_external_force_and_torque(
-            forces=all_forces,
-            torques=all_torques,
-            body_ids=thruster_body_ids,
-            env_ids=None,  # All environments
-            is_global=False  # Local frame
-        )
+        # Debug print
+        print(f"\n=== Individual Forces via Composable API ===")
+        print(f"Composed forces[0]: {self._wrench_composer.composed_force_as_torch[0]}")
+        print(f"Composed torques[0]: {self._wrench_composer.composed_torque_as_torch[0]}")
     
     def _set_combined_wrench(self):
         """Set combined wrench to the base link."""
+        # Reset the wrench composer
+        self.reset_composable_force_and_torque()
+        
         # Combine thrusts using allocation matrix
         thrusts = self._thrust_target_sim
         wrench = (self._allocation_matrix @ thrusts.T).T  # Shape: (num_envs, 6)
@@ -558,8 +558,8 @@ class Multirotor(Articulation):
         forces = wrench[:, :3].unsqueeze(1)  # Shape: (num_envs, 1, 3)
         torques = wrench[:, 3:].unsqueeze(1)  # Shape: (num_envs, 1, 3)
         
-        # Use the base class API to set external forces on base link (body 0)
-        self.set_external_force_and_torque(
+        # Add to base link using composable API
+        self.add_composable_force_and_torque(
             forces=forces,
             torques=torques,
             body_ids=[0],  # Base link only
@@ -567,13 +567,20 @@ class Multirotor(Articulation):
             is_global=False  # Local frame
         )
         
+        # Debug print
+        print(f"\n=== Combined Wrench via Composable API ===")
+        print(f"forces[0]: {forces[0]}")
+        print(f"torques[0]: {torques[0]}")
+        
     def write_data_to_sim(self):
         """Write thrust and torque commands to the simulation."""
         # Apply actuator model to compute thrust values
         self._apply_actuator_model()
-        # Set thruster forces into external force buffers
+        
+        # Set thruster forces using composable API
         self._set_thruster_forces_to_buffers()
-        # Call parent to apply external forces
+        
+        # Call parent to apply composed forces
         super().write_data_to_sim()
     
     def _validate_cfg(self):

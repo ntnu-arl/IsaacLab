@@ -335,5 +335,4 @@ class ThrusterCfg():
                                    "back_right_prop", 
                                    "front_left_prop", 
                                    "front_right_prop"]
-    
-    """Articulation's joint names that are part of the group."""
+    """Articulation's thruster names that are part of the group."""

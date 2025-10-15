@@ -71,5 +71,5 @@ LMF2_CFG = MultirotorCfg(
             [-0.13, 0.13, 0.13, -0.13],
             [-0.07, 0.07, -0.07, 0.07],
         ],
-    force_application_mode="combined"
+    force_application_mode="individual"
 )

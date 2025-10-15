@@ -35,7 +35,7 @@ class WrenchComposer:
         self.device = device
         self._asset = asset
 
-        if (self._asset.__class__.__name__ == "Articulation") or (self._asset.__class__.__name__ == "RigidObject"):
+        if (self._asset.__class__.__name__ == "Articulation") or (self._asset.__class__.__name__ == "RigidObject") or (self._asset.__class__.__name__ == "Multirotor") :
             self._get_com_fn = lambda a=self._asset: a.data.body_com_pose_w[..., :3]
         elif self._asset.__class__.__name__ == "RigidObjectCollection":
             self._get_com_fn = lambda a=self._asset: a.data.object_com_pose_w[..., :3]
@@ -152,8 +152,6 @@ class WrenchComposer:
             torques = wp.empty((0, 0), dtype=wp.vec3f, device=self.device)
         if positions is None:
             positions = wp.empty((0, 0), dtype=wp.vec3f, device=self.device)
-
-        print("is_global", is_global)
 
         if is_global:
             if not self._com_positions_updated:
