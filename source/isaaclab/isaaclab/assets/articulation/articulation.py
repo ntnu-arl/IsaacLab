@@ -1004,7 +1004,9 @@ class Articulation(AssetBase):
         if body_ids is None:
             body_ids = self._ALL_BODY_INDICES_WP
         elif isinstance(body_ids, slice):
-            body_ids = wp.from_torch(torch.arange(self.num_bodies, dtype=torch.int32, device=self.device)[body_ids], dtype=wp.int32)
+            body_ids = wp.from_torch(
+                torch.arange(self.num_bodies, dtype=torch.int32, device=self.device)[body_ids], dtype=wp.int32
+            )
         elif not isinstance(body_ids, torch.Tensor):
             body_ids = wp.array(body_ids, dtype=wp.int32, device=self.device)
         else:
@@ -1018,7 +1020,6 @@ class Articulation(AssetBase):
             positions=wp.from_torch(positions, dtype=wp.vec3f) if positions is not None else None,
             is_global=is_global,
         )
-
 
     def add_permanent_external_wrench(
         self,
@@ -1068,7 +1069,9 @@ class Articulation(AssetBase):
         if body_ids is None:
             body_ids = self._ALL_BODY_INDICES_WP
         elif isinstance(body_ids, slice):
-            body_ids = wp.from_torch(torch.arange(self.num_bodies, dtype=torch.int32, device=self.device)[body_ids], dtype=wp.int32)
+            body_ids = wp.from_torch(
+                torch.arange(self.num_bodies, dtype=torch.int32, device=self.device)[body_ids], dtype=wp.int32
+            )
         elif not isinstance(body_ids, torch.Tensor):
             body_ids = wp.array(body_ids, dtype=wp.int32, device=self.device)
         else:
@@ -1148,7 +1151,9 @@ class Articulation(AssetBase):
         if body_ids is None:
             body_ids = self._ALL_BODY_INDICES_WP
         elif isinstance(body_ids, slice):
-            body_ids = wp.from_torch(torch.arange(self.num_bodies, dtype=torch.int32, device=self.device)[body_ids], dtype=wp.int32)
+            body_ids = wp.from_torch(
+                torch.arange(self.num_bodies, dtype=torch.int32, device=self.device)[body_ids], dtype=wp.int32
+            )
         elif not isinstance(body_ids, torch.Tensor):
             body_ids = wp.array(body_ids, dtype=wp.int32, device=self.device)
         else:
@@ -2319,4 +2324,6 @@ class Articulation(AssetBase):
             "The function 'set_external_force_and_torque' will be deprecated in a future release. Please"
             " use 'set_permanent_external_wrench' instead."
         )
-        self.set_permanent_external_wrench(forces=forces, torques=torques, positions=positions, body_ids=body_ids, env_ids=env_ids, is_global=is_global)
+        self.set_permanent_external_wrench(
+            forces=forces, torques=torques, positions=positions, body_ids=body_ids, env_ids=env_ids, is_global=is_global
+        )
