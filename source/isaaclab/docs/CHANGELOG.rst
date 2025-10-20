@@ -1,7 +1,7 @@
 Changelog
 ---------
 
-0.46.6 (2025-10-16)
+0.47.2 (2025-10-20)
 ~~~~~~~~~~~~~~~~~~~
 
 Added
@@ -22,13 +22,37 @@ Added
 
 Changed
 ^^^^^^^
+
 * Deprecated :meth:`~isaaclab.assets.Articulation.set_external_force_and_torque`  in favor of :meth:`~isaaclab.assets.Articulation.set_permanent_external_wrench`.
 * Deprecated :meth:`~isaaclab.assets.RigidObject.set_external_force_and_torque`  in favor of :meth:`~isaaclab.assets.RigidObject.set_permanent_external_wrench`.
 * Deprecated :meth:`~isaaclab.assets.RigidObjectCollection.set_external_force_and_torque`  in favor of :meth:`~isaaclab.assets.RigidObjectCollection.set_permanent_external_wrench`.
 * Modified the tests of the articulation, rigid object, and rigid object collection to use the new permanent and instantaneous external wrench functions and test them.
 
+0.47.1 (2025-10-17)
+~~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added :meth:`~isaaclab.sim.utils.resolve_prim_pose` to resolve the pose of a prim with respect to another prim.
+* Added :meth:`~isaaclab.sim.utils.resolve_prim_scale` to resolve the scale of a prim in the world frame.
+
+
+0.47.0 (2025-10-14)
+~~~~~~~~~~~~~~~~~~~
+
+Changed
+^^^^^^^
+
+* Removed pickle utilities for saving and loading configurations as pickle contains security vulnerabilities in its APIs.
+  Configurations can continue to be saved and loaded through yaml.
+
+
 0.46.5 (2025-10-14)
 ~~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
 
 * Exposed parameter :attr:`~isaaclab.sim.spawners.PhysxCfg.solve_articulation_contact_last`
   to configure USD attribute ``physxscene:solveArticulationContactLast``. This parameter may
