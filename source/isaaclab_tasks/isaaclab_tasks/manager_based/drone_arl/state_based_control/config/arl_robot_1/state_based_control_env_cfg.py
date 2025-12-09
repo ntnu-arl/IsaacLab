@@ -140,6 +140,72 @@ class EventCfg:
             },
         },
     )
+    
+    # interval - impulse disturbances (duration_steps=1)
+    impulse_disturbance = EventTerm(
+        func=mdp.apply_disturbance,
+        mode="interval",
+        interval_range_s=(0.5, 1.5),
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "force_range": (-2.0, 2.0),
+            "torque_range": (-0.3, 0.3),
+            "body_name": "base_link",
+            "duration_steps": 1,  # Impulse: auto-clears after 1 step
+        },
+    )
+
+    # Impulse disturbances (auto-clears after 1 step)
+    impulse_disturbance = EventTerm(
+        func=mdp.apply_disturbance,
+        mode="interval",
+        interval_range_s=(0.5, 1.5), # When to trigger (applies once)
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "force_range": (-2.0, 2.0),
+            "torque_range": (-0.3, 0.3),
+            "body_name": "base_link",
+            "duration_steps": 1, # Auto-clears after 1 step
+        },
+    )
+
+    # Continuous disturbance (applied once, clears after duration)
+    continuous_disturbance = EventTerm(
+        func=mdp.apply_continuous_disturbance_with_duration, 
+        mode="interval",
+        interval_range_s=(2.0, 4.0),  # When to trigger (applies once)
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "force_range": (-1.0, 1.0),
+            "torque_range": (-0.2, 0.2),
+            "body_name": "base_link",
+            "duration_s": 1.0,  # Auto-clears after 1 second
+        },
+    )
+
+    # # interval - continuous disturbances (duration_steps > 1)
+    # continuous_disturbance_start = EventTerm(
+    #     func=mdp.apply_disturbance,
+    #     mode="interval",
+    #     interval_range_s=(2.0, 4.0),
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "force_range": (-1.0, 1.0),
+    #         "torque_range": (-0.2, 0.2),
+    #         "body_name": "base_link",
+    #         "duration_steps": 50,  # Continuous: lasts 50 steps (needs manual clearing)
+    #     },
+    # )
+
+    # # interval - clear continuous disturbances
+    # continuous_disturbance_end = EventTerm(
+    #     func=mdp.clear_disturbance,
+    #     mode="interval",
+    #     interval_range_s=(0.5, 1.5),
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #     },
+    # )
 
 
 @configclass

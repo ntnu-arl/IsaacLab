@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import omni.log
+import warp as wp
 
 import isaaclab.utils.string as string_utils
 from isaaclab.actuators import Thruster
@@ -129,11 +130,59 @@ class Multirotor(Articulation):
         if self._data.thrust_target is not None and self._data.default_thruster_rps is not None:
             self._data.thrust_target[env_ids] = self._data.default_thruster_rps[env_ids]
 
+    # def write_data_to_sim(self):
+    #     """Write thrust and torque commands to the simulation."""
+    #     self._apply_actuator_model()
+    #     # apply thruster forces at individual locations
+    #     self._apply_combined_wrench()
+        
+    # def _apply_combined_wrench(self):
+    #     """Apply combined wrench to the base link."""
+    #     # Combine individual thrusts into a wrench vector
+    #     self._combine_thrusts()
+
+    #     self.root_physx_view.apply_forces_and_torques_at_position(
+    #         force_data=self._internal_force_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
+    #         torque_data=self._internal_torque_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
+    #         position_data=None,  # Apply at center of mass
+    #         indices=self._ALL_INDICES,
+    #         is_global=False,  # Forces are in local frame
+    #     )
+        
     def write_data_to_sim(self):
-        """Write thrust and torque commands to the simulation."""
+        """Write thrust and torque commands to the simulation.
+        
+        This method applies thruster forces and external disturbances (both impulse and continuous)
+        using the wrench composer system. Thruster forces are added to the instantaneous composer
+        each step, while external disturbances can be either instantaneous (impulses) or permanent
+        (continuous forces like wind).
+        """
+        # Apply thruster model
         self._apply_actuator_model()
-        # apply thruster forces at individual locations
-        self._apply_combined_wrench()
+        # Combine individual thrusts into a wrench vector
+        self._combine_thrusts()
+        
+        # Add thruster forces to instantaneous wrench composer
+        self._instantaneous_wrench_composer.add_forces_and_torques(
+            self._ALL_INDICES_WP,
+            self._ALL_BODY_INDICES_WP,
+            forces=wp.from_torch(self._internal_force_target_sim, dtype=wp.vec3f),
+            torques=wp.from_torch(self._internal_torque_target_sim, dtype=wp.vec3f),
+            is_global=False,
+        )
+        
+        # Apply all wrenches together:
+        if self._instantaneous_wrench_composer.active or self._permanent_wrench_composer.active:
+            composed_force, composed_torque = self._get_final_wrenches()
+            self.root_physx_view.apply_forces_and_torques_at_position(
+                force_data=composed_force.view(-1, 3),
+                torque_data=composed_torque.view(-1, 3),
+                position_data=None,
+                indices=self._ALL_INDICES,
+                is_global=False,
+            )
+            # Reset instantaneous composer (thruster forces + impulses) permanent composer persists
+            self._instantaneous_wrench_composer.reset()
 
     def _initialize_impl(self):
         """Initialize the multirotor implementation."""
@@ -332,19 +381,6 @@ class Multirotor(Articulation):
             # update state of the actuator model
             self._data.computed_thrust[:, actuator.thruster_indices] = actuator.computed_thrust
             self._data.applied_thrust[:, actuator.thruster_indices] = actuator.applied_thrust
-
-    def _apply_combined_wrench(self):
-        """Apply combined wrench to the base link (like articulation_with_thrusters.py)."""
-        # Combine individual thrusts into a wrench vector
-        self._combine_thrusts()
-
-        self.root_physx_view.apply_forces_and_torques_at_position(
-            force_data=self._internal_force_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
-            torque_data=self._internal_torque_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
-            position_data=None,  # Apply at center of mass
-            indices=self._ALL_INDICES,
-            is_global=False,  # Forces are in local frame
-        )
 
     def _combine_thrusts(self):
         """Combine individual thrusts into a wrench vector."""
