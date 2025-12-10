@@ -19,6 +19,7 @@ import isaaclab.utils.string as string_utils
 from isaaclab.actuators import Thruster
 from isaaclab.assets.articulation.multirotor_data import MultirotorData
 from isaaclab.utils.types import ArticulationThrustActions
+from isaaclab.utils.math import quat_apply_inverse
 
 from .articulation import Articulation
 
@@ -129,25 +130,6 @@ class Multirotor(Articulation):
         # reset thruster targets to default values
         if self._data.thrust_target is not None and self._data.default_thruster_rps is not None:
             self._data.thrust_target[env_ids] = self._data.default_thruster_rps[env_ids]
-
-    # def write_data_to_sim(self):
-    #     """Write thrust and torque commands to the simulation."""
-    #     self._apply_actuator_model()
-    #     # apply thruster forces at individual locations
-    #     self._apply_combined_wrench()
-        
-    # def _apply_combined_wrench(self):
-    #     """Apply combined wrench to the base link."""
-    #     # Combine individual thrusts into a wrench vector
-    #     self._combine_thrusts()
-
-    #     self.root_physx_view.apply_forces_and_torques_at_position(
-    #         force_data=self._internal_force_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
-    #         torque_data=self._internal_torque_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
-    #         position_data=None,  # Apply at center of mass
-    #         indices=self._ALL_INDICES,
-    #         is_global=False,  # Forces are in local frame
-    #     )
         
     def write_data_to_sim(self):
         """Write thrust and torque commands to the simulation.
@@ -171,7 +153,10 @@ class Multirotor(Articulation):
             is_global=False,
         )
         
-        # Apply all wrenches together:
+        # Apply drag forces and torques
+        self._apply_drag()
+        
+        # Apply all wrenches together
         if self._instantaneous_wrench_composer.active or self._permanent_wrench_composer.active:
             composed_force, composed_torque = self._get_final_wrenches()
             self.root_physx_view.apply_forces_and_torques_at_position(
@@ -381,6 +366,44 @@ class Multirotor(Articulation):
             # update state of the actuator model
             self._data.computed_thrust[:, actuator.thruster_indices] = actuator.computed_thrust
             self._data.applied_thrust[:, actuator.thruster_indices] = actuator.applied_thrust
+    
+    def _apply_drag(self):
+        """Apply aerodynamic drag forces and torques to the base link.
+
+        The drag model follows:
+        - Linear drag: F = -C_lin * v - C_quad * |v| * v (world-frame)
+        - Angular drag: T = -C_lin * w - C_quad * |w| * w (body-frame)
+        """
+        # Get world-frame velocities for base link (body index 0)
+        v = self.data.body_lin_vel_w[:, 0, :]  
+        w_world = self.data.body_ang_vel_w[:, 0, :] 
+        
+        # Convert angular velocity from world to body frame
+        quat_w = self.data.body_quat_w[:, 0, :]  
+        w = quat_apply_inverse(quat_w, w_world) 
+
+        # Compute linear drag in world frame
+        lin_drag = -self.cfg.lin_drag_linear_coef * v
+        v_norm = torch.linalg.vector_norm(v, dim=-1, keepdim=True)
+        lin_drag = lin_drag - self.cfg.lin_drag_quadratic_coef * v_norm * v
+
+        # Compute angular drag in body frame
+        ang_drag = -self.cfg.ang_drag_linear_coef * w
+        w_norm = torch.linalg.vector_norm(w, dim=-1, keepdim=True)
+        ang_drag = ang_drag - self.cfg.ang_drag_quadratic_coef * w_norm * w
+
+        # Reshape for wrench composer
+        forces = lin_drag.unsqueeze(1)  # world-frame
+        torques = ang_drag.unsqueeze(1)  # body-frame
+
+        # Add drag to instantaneous wrench composer
+        self._instantaneous_wrench_composer.add_forces_and_torques(
+            self._ALL_INDICES_WP,
+            self._ALL_BODY_INDICES_WP[:1],  # base_link only
+            forces=wp.from_torch(forces, dtype=wp.vec3f),
+            torques=wp.from_torch(torques, dtype=wp.vec3f),
+            is_global=False,
+        )
 
     def _combine_thrusts(self):
         """Combine individual thrusts into a wrench vector."""

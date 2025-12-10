@@ -46,3 +46,12 @@ class MultirotorCfg(ArticulationCfg):
 
     rotor_directions: list[int] | None = None
     """List of rotor directions, -1 for clockwise, 1 for counter-clockwise."""
+    
+    # Drag coefficients (per-axis scalars)
+    lin_drag_linear_coef: float = 0.0
+    lin_drag_quadratic_coef: float = 0.0
+    """Drag coefficients for linear velocity."""
+    
+    ang_drag_linear_coef: float = 0.0
+    ang_drag_quadratic_coef: float = 0.0
+    """Drag coefficients for angular velocity."""
