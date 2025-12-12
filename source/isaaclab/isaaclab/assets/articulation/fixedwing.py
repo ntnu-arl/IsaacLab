@@ -19,7 +19,7 @@ import isaaclab.utils.string as string_utils
 from isaaclab.actuators import Thruster
 from isaaclab.assets.articulation.fixedwing_data import FixedWingData
 from isaaclab.utils.types import ArticulationThrustActions
-from isaaclab.utils.math import quat_apply_inverse
+from isaaclab.utils.math import quat_apply_inverse, quat_apply
 
 from .articulation import Articulation
 
@@ -75,20 +75,16 @@ class FixedWing(Articulation):
 
         forces = torch.zeros_like(self.data.body_lin_vel_w)
         torques = torch.zeros_like(forces)
+        quat_w = self.data.body_quat_w[:, 0, :]
 
         for _, body_idx in self.aero_link_mapping.items():
-            v = self.data.body_lin_vel_w[:, body_idx, :]
-            w_world = self.data.body_ang_vel_w[:, body_idx, :]
-            v_projected = v.clone()
+            v_world = self.data.body_lin_vel_w[:, body_idx, :]
+            v = quat_apply_inverse(quat_w, v_world)
+            v_projected = -v.clone()
             v_projected[:, 1] = 0.0  # project onto x-z plane
-
-            # Convert angular velocity from world to body frame
-            quat_w = self.data.body_quat_w[:, 0, :]
-            w = quat_apply_inverse(quat_w, w_world)
 
             aoa = torch.atan2(v[:, 2], v[:, 0])  # angle of attack
             sideslip = torch.atan2(v[:, 1], v[:, 0])  # sideslip angle
-
             drag = (
                 self.cfg.C_d
                 * torch.abs(torch.sin(aoa))
@@ -100,8 +96,8 @@ class FixedWing(Articulation):
             )
 
             v_projected_flipped = v_projected.clone()
-            v_projected_flipped[:, 0] = -v_projected_flipped[:, 2]
-            v_projected_flipped[:, 2] = -v_projected_flipped[:, 0]
+            v_projected_flipped[:, 0] = v_projected_flipped[:, 2]
+            v_projected_flipped[:, 2] = v_projected_flipped[:, 0]
 
             lift_turbulent = (
                 self.cfg.C_lt
@@ -113,8 +109,8 @@ class FixedWing(Articulation):
                 / 2
             )
 
-            forces[:, body_idx, :] = -drag + 0 * lift_turbulent
-        print(forces)
+            forces[:, body_idx, :] = drag + lift_turbulent
+        forces = quat_apply_inverse(quat_w, forces)
         self._instantaneous_wrench_composer.add_forces_and_torques(
             self._ALL_INDICES_WP,
             self._ALL_BODY_INDICES_WP,  # base_link only
