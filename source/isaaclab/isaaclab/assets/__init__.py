@@ -38,10 +38,28 @@ specified joint targets are not directly applied to the simulator but are instea
 the corresponding actuator torques.
 """
 
-from .articulation import Articulation, ArticulationCfg, ArticulationData, Multirotor, MultirotorCfg, MultirotorData
+from .articulation import (
+    Articulation,
+    ArticulationCfg,
+    ArticulationData,
+    Multirotor,
+    MultirotorCfg,
+    MultirotorData,
+    FixedWing,
+    FixedWingCfg,
+    FixedWingData,
+)
 from .asset_base import AssetBase
 from .asset_base_cfg import AssetBaseCfg
-from .deformable_object import DeformableObject, DeformableObjectCfg, DeformableObjectData
+from .deformable_object import (
+    DeformableObject,
+    DeformableObjectCfg,
+    DeformableObjectData,
+)
 from .rigid_object import RigidObject, RigidObjectCfg, RigidObjectData
-from .rigid_object_collection import RigidObjectCollection, RigidObjectCollectionCfg, RigidObjectCollectionData
+from .rigid_object_collection import (
+    RigidObjectCollection,
+    RigidObjectCollectionCfg,
+    RigidObjectCollectionData,
+)
 from .surface_gripper import SurfaceGripper, SurfaceGripperCfg

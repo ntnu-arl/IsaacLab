@@ -11,3 +11,6 @@ from .articulation_data import ArticulationData
 from .multirotor import Multirotor
 from .multirotor_cfg import MultirotorCfg
 from .multirotor_data import MultirotorData
+from .fixedwing import FixedWing
+from .fixedwing_cfg import FixedWingCfg
+from .fixedwing_data import FixedWingData

@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING
 
 import warp as wp
 
-from isaaclab.utils.warp.kernels import add_forces_and_torques_at_position, set_forces_and_torques_at_position
+from isaaclab.utils.warp.kernels import (
+    add_forces_and_torques_at_position,
+    set_forces_and_torques_at_position,
+)
 
 from ..asset_base import AssetBase
 
@@ -19,7 +22,13 @@ if TYPE_CHECKING:
 
 
 class WrenchComposer:
-    def __init__(self, num_envs: int, num_bodies: int, device: str, asset: AssetBase | None = None) -> None:
+    def __init__(
+        self,
+        num_envs: int,
+        num_bodies: int,
+        device: str,
+        asset: AssetBase | None = None,
+    ) -> None:
         """Wrench composer.
 
         This class is used to compose forces and torques at the body's center of mass frame.
@@ -37,22 +46,36 @@ class WrenchComposer:
         self._asset = asset
         self._active = False
 
-        if (self._asset.__class__.__name__ == "Articulation") or (self._asset.__class__.__name__ == "RigidObject"):
+        if (self._asset.__class__.__name__ == "Articulation") or (
+            self._asset.__class__.__name__ == "RigidObject"
+        ):
             self._get_com_fn = lambda a=self._asset: a.data.body_com_pos_w[..., :3]
         elif self._asset.__class__.__name__ == "RigidObjectCollection":
             self._get_com_fn = lambda a=self._asset: a.data.object_com_pos_w[..., :3]
-        elif self._asset.__class__.__name__ == "Multirotor":
+        elif (self._asset.__class__.__name__ == "Multirotor") or (
+            self._asset.__class__.__name__ == "FixedWing"
+        ):
             self._get_com_fn = lambda a=self._asset: a.data.body_com_pos_w[..., :3]
         elif self._asset is None:
-            self._get_com_fn = lambda: wp.zeros((self.num_envs, self.num_bodies), dtype=wp.vec3f, device=self.device)
+            self._get_com_fn = lambda: wp.zeros(
+                (self.num_envs, self.num_bodies), dtype=wp.vec3f, device=self.device
+            )
         else:
-            raise ValueError(f"Unsupported asset type: {self._asset.__class__.__name__}")
+            raise ValueError(
+                f"Unsupported asset type: {self._asset.__class__.__name__}"
+            )
 
         self._com_positions_updated = False
 
-        self._composed_force_b = wp.zeros((num_envs, num_bodies), dtype=wp.vec3f, device=device)
-        self._composed_torque_b = wp.zeros((num_envs, num_bodies), dtype=wp.vec3f, device=device)
-        self._com_positions = wp.zeros((num_envs, num_bodies), dtype=wp.vec3f, device=device)
+        self._composed_force_b = wp.zeros(
+            (num_envs, num_bodies), dtype=wp.vec3f, device=device
+        )
+        self._composed_torque_b = wp.zeros(
+            (num_envs, num_bodies), dtype=wp.vec3f, device=device
+        )
+        self._com_positions = wp.zeros(
+            (num_envs, num_bodies), dtype=wp.vec3f, device=device
+        )
         # Pinning the composed force and torque to the torch tensor to avoid copying the data to the torch tensor every time.
         self._composed_force_b_torch = wp.to_torch(self._composed_force_b)
         self._composed_torque_b_torch = wp.to_torch(self._composed_torque_b)
@@ -171,7 +194,9 @@ class WrenchComposer:
         if is_global:
             if not self._com_positions_updated:
                 if self._asset is not None:
-                    self._com_positions = wp.from_torch(self._get_com_fn().clone(), dtype=wp.vec3f)
+                    self._com_positions = wp.from_torch(
+                        self._get_com_fn().clone(), dtype=wp.vec3f
+                    )
                 else:
                     raise ValueError(
                         "Center of mass positions are not available. Please provide an asset to the wrench composer."
@@ -230,7 +255,9 @@ class WrenchComposer:
         if is_global:
             if not self._com_positions_updated:
                 if self._asset is not None:
-                    self._com_positions = wp.from_torch(self._get_com_fn().clone(), dtype=wp.vec3f)
+                    self._com_positions = wp.from_torch(
+                        self._get_com_fn().clone(), dtype=wp.vec3f
+                    )
                 else:
                     raise ValueError(
                         "Center of mass positions are not available. Please provide an asset to the wrench composer."
