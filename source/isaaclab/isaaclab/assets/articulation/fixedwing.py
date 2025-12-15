@@ -46,12 +46,21 @@ class FixedWing(Articulation):
         super().__init__(cfg)
 
         self.aero_link_mapping: dict[str, int] = {}
+        self.aero_surface_link_mapping: dict[str, int] = {}
+        self.aero_actuator_link_mapping: dict[str, int] = {}
 
     def _process_aero_cfg(self) -> None:
         for link_name in self.cfg.aero_link_names:
-            body_indice, link_names = self.find_bodies(link_name)
+            body_idx, link_names = self.find_bodies(link_name)
+            self.aero_link_mapping[link_names[0]] = body_idx[0]
 
-            self.aero_link_mapping[link_names[0]] = body_indice[0]
+        for link_name, control_surface in self.cfg.controlsurface_mapping.items():
+            body_idx, link_names = self.find_bodies(control_surface)
+            self.aero_surface_link_mapping[link_name] = body_idx[0]
+
+        for link_name, servo_name in self.cfg.controlactuator_mapping.items():
+            body_idx = self.data.joint_names.index(servo_name)
+            self.aero_actuator_link_mapping[link_name] = body_idx
 
     def _initialize_impl(self):
         """Initialize the multirotor implementation."""
@@ -75,47 +84,73 @@ class FixedWing(Articulation):
 
         forces = torch.zeros_like(self.data.body_lin_vel_w)
         torques = torch.zeros_like(forces)
-        quat_w = self.data.body_quat_w[:, 0, :]
+        positions = torch.zeros_like(forces)
+        base_pos = self.data.body_pos_w[:, 0, :]
+        delta_q = 0
 
-        for _, body_idx in self.aero_link_mapping.items():
+        for link_name, body_idx in self.aero_link_mapping.items():
             v_world = self.data.body_lin_vel_w[:, body_idx, :]
+            p_world = self.data.body_pos_w[:, body_idx, :]
+            quat_w = self.data.body_quat_w[:, body_idx, :]
+
             v = quat_apply_inverse(quat_w, v_world)
             v_projected = -v.clone()
             v_projected[:, 1] = 0.0  # project onto x-z plane
+            v_projected_flipped = v_projected.clone()
+            v_projected_flipped[:, 0] = -v_projected[:, 2]
+            v_projected_flipped[:, 2] = v_projected[:, 0]
 
             aoa = torch.atan2(v[:, 2], v[:, 0])  # angle of attack
-            sideslip = torch.atan2(v[:, 1], v[:, 0])  # sideslip angle
-            drag = (
-                self.cfg.C_d
-                * torch.abs(torch.sin(aoa))
-                * v_projected
-                * torch.abs(v_projected)
+
+            delta_q = self.data.joint_pos[:, self.aero_actuator_link_mapping[link_name]]
+
+            drag_coeff = (
+                (
+                    self.cfg.C_d * torch.abs(torch.sin(aoa))
+                    + delta_q * self.cfg.q_drag
+                    + 0.1
+                )
+                * self.cfg.rho
+                * self.cfg.wing_area_projected
+                / 2
+            )
+            drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
+
+            lift_coeff = (
+                (self.cfg.C_lt * torch.sin(2 * aoa) + delta_q * self.cfg.q_lift)
+                * self.cfg.rho
+                * self.cfg.wing_area_projected
+                / 2
+            )
+            lift_turbulent = (
+                lift_coeff.unsqueeze(-1)
+                * v_projected_flipped
+                * torch.abs(v_projected_flipped)
+            )
+
+            moment_coeff = (
+                (self.cfg.C_m * torch.sin(aoa) + delta_q * self.cfg.q_torque)
                 * self.cfg.rho
                 * self.cfg.wing_area_projected
                 / 2
             )
 
-            v_projected_flipped = v_projected.clone()
-            v_projected_flipped[:, 0] = v_projected_flipped[:, 2]
-            v_projected_flipped[:, 2] = v_projected_flipped[:, 0]
-
-            lift_turbulent = (
-                self.cfg.C_lt
-                * torch.sin(2 * aoa)
-                * v_projected_flipped
-                * torch.abs(v_projected_flipped)
-                * self.cfg.rho
-                * self.cfg.wing_area_projected
-                / 2
+            torque = (
+                moment_coeff.unsqueeze(-1)
+                * torch.norm(v_projected**2, dim=-1, keepdim=True)
+                * torch.tensor([0.0, -1.0, 0.0], device=v_projected.device)
             )
 
             forces[:, body_idx, :] = drag + lift_turbulent
-        forces = quat_apply_inverse(quat_w, forces)
+            torques[:, body_idx, :] = torque
+            positions[:, body_idx, :] = quat_apply_inverse(quat_w, p_world - base_pos)
+
         self._instantaneous_wrench_composer.add_forces_and_torques(
             self._ALL_INDICES_WP,
             self._ALL_BODY_INDICES_WP,  # base_link only
             forces=wp.from_torch(forces, dtype=wp.vec3f),
             torques=wp.from_torch(torques, dtype=wp.vec3f),
+            positions=wp.from_torch(positions, dtype=wp.vec3f),
             is_global=False,
         )
 
