@@ -45,10 +45,19 @@ class FixedWing(Articulation):
         """
         super().__init__(cfg)
 
+        self._device: torch.device = torch.device(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )
         self.aero_link_mapping: dict[str, int] = {}
         self.aero_actuator_link_mapping: dict[str, int] = {}
         self.engine_link_mapping: dict[str, int] = {}
         self.engine_actuator_link_mapping: dict[str, int] = {}
+
+        self.roll_axis = torch.tensor(
+            [0.0, -1.0, 0.0],
+            device=self._device,
+        )
+        self.wing_drag_tensor: dict[str, torch.Tensor] = {}
 
     def _process_aero_cfg(self) -> None:
         for link_name, wing_cfg in self.cfg.wings.items():
@@ -58,6 +67,9 @@ class FixedWing(Articulation):
                     f"Could not find body '{link_name}' for fixed-wing aerodynamics."
                 )
             self.aero_link_mapping[link_names[0]] = body_idx[0]
+            self.wing_drag_tensor[link_name] = torch.tensor(
+                [wing_cfg.agl_dr, wing_cfg.agl_dp, 0.0], device=self._device
+            )
 
             if wing_cfg.has_controlsurface:
                 actuator_name = wing_cfg.connected_actuator
@@ -119,6 +131,7 @@ class FixedWing(Articulation):
 
             v = quat_apply_inverse(quat_w, v_world)
             w = quat_apply_inverse(quat_w, w_world)
+
             v_projected = -v.clone()
             v_projected[:, 1] = 0.0  # project onto x-z plane
             v_projected_flipped = v_projected.clone()
@@ -135,7 +148,10 @@ class FixedWing(Articulation):
                 delta_q = 0.0
 
             drag_coeff = (
-                (wing_cfg.C_d * torch.sin(aoa) ** 2 + delta_q * wing_cfg.q_drag + 0.1)
+                (
+                    wing_cfg.C_d * torch.sin(aoa) ** 2
+                    + (0.1 + abs(delta_q) * wing_cfg.q_drag) * torch.cos(aoa)
+                )
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
@@ -143,7 +159,10 @@ class FixedWing(Articulation):
             drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
 
             lift_coeff = (
-                (wing_cfg.C_lt * torch.sin(2 * aoa) + delta_q * wing_cfg.q_lift)
+                (
+                    wing_cfg.C_lt * torch.sin(2 * aoa)
+                    + delta_q * wing_cfg.q_lift * torch.cos(2 * aoa)
+                )
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
@@ -155,20 +174,25 @@ class FixedWing(Articulation):
             )
 
             moment_coeff = (
-                (wing_cfg.C_m * aoa + delta_q * wing_cfg.q_torque)
+                (
+                    wing_cfg.C_m * torch.sin(2 * aoa)
+                    + delta_q * wing_cfg.q_torque * torch.cos(2 * aoa)
+                )
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
             )
 
+            angl_drag = -torch.mul(w, self.wing_drag_tensor[link_name])
+
             torque = (
                 moment_coeff.unsqueeze(-1)
                 * torch.norm(v_projected**2, dim=-1, keepdim=True)
-                * torch.tensor([0.0, -1.0, 0.0], device=v_projected.device)
+                * self.roll_axis
             )
 
             forces[:, body_idx, :] = drag + lift_turbulent
-            torques[:, body_idx, :] = torque
+            torques[:, body_idx, :] = torque + angl_drag
             positions[:, body_idx, :] = quat_apply_inverse(quat_w, p_world - base_pos)
 
         self._instantaneous_wrench_composer.add_forces_and_torques(
@@ -198,12 +222,12 @@ class FixedWing(Articulation):
 
             rpm = (
                 self.data.joint_vel[:, self.engine_actuator_link_mapping[link_name]]
-                / 1000.0
+                / engine_cfg.max_rpm
             )
 
             forces[:, body_idx, 0] = torch.clamp(
                 rpm * engine_cfg.thrust_coefficient * engine_cfg.spin_direction
-                - v[:, 0] * 0.5,
+                - torch.abs(v[:, 0]) * v[:, 0] * engine_cfg.effectiveness,
                 0,
                 engine_cfg.max_thrust,
             )

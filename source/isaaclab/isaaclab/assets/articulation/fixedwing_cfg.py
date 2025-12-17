@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
-
+import torch
 
 from isaaclab.utils import configclass
 
@@ -25,6 +25,8 @@ class FloaterCfg:
         C_d: float = 2.25,
         C_lt: float = 1.2,
         C_m: float = 0.06,
+        agl_dp: float = 0.0,
+        agl_dr: float = 0.0,
         wing_area_projected: float = 1,
         has_controlsurface: bool = False,
         connected_actuator: str = "",
@@ -35,6 +37,8 @@ class FloaterCfg:
         self.C_d = C_d
         self.C_lt = C_lt
         self.C_m = C_m
+        self.agl_dp = agl_dp
+        self.agl_dr = agl_dr
         self.wing_area_projected = wing_area_projected
         self.has_controlsurface = has_controlsurface
         self.connected_actuator = connected_actuator
@@ -53,20 +57,20 @@ class EngineCfg:
     def __init__(
         self,
         max_thrust: float = 15.0,
-        min_rpm: float = 0.0,
         max_rpm: float = 1000.0,
         thrust_coefficient: float = 1.0,
         torque_coefficient: float = 0.1,
         connected_actuator: str = "",
         spin_direction: int = 1,
+        effectiveness: float = 0.0,
     ):
         self.max_thrust = max_thrust
-        self.min_rpm = min_rpm
         self.max_rpm = max_rpm
         self.thrust_coefficient = thrust_coefficient
         self.torque_coefficient = torque_coefficient
         self.connected_actuator = connected_actuator
         self.spin_direction = spin_direction
+        self.effectiveness = effectiveness
 
 
 @configclass
