@@ -23,20 +23,32 @@ class FloaterCfg:
     def __init__(
         self,
         C_d: float = 2.25,
+        C_ds: float = 0.05,
+        C_ll: float = 2.6,
         C_lt: float = 1.2,
         C_m: float = 0.06,
+        stallable: bool = True,
+        stall_angle: float = 8.0,
+        stall_range: float = 12.0,
         agl_dp: float = 0.0,
         agl_dr: float = 0.0,
         wing_area_projected: float = 1,
         has_controlsurface: bool = False,
         connected_actuator: str = "",
+        q_reduced_effectiveness: float = 0.4,
         q_drag: float = 0.0,
         q_lift: float = 0.0,
         q_torque: float = 0.0,
     ):
         self.C_d = C_d
+        self.C_ds = C_ds
+        self.C_ll = C_ll
         self.C_lt = C_lt
         self.C_m = C_m
+        self.q_reduced_effectiveness = q_reduced_effectiveness
+        self.stallable = stallable
+        self.stall_angle = stall_angle / 180.0 * 3.141592653589793
+        self.stall_range = stall_range / 180.0 * 3.141592653589793
         self.agl_dp = agl_dp
         self.agl_dr = agl_dr
         self.wing_area_projected = wing_area_projected

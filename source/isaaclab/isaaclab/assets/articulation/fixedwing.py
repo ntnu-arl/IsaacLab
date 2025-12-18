@@ -12,7 +12,6 @@ import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-import omni.log
 import warp as wp
 
 import isaaclab.utils.string as string_utils
@@ -57,7 +56,11 @@ class FixedWing(Articulation):
             [0.0, -1.0, 0.0],
             device=self._device,
         )
+        self._ones = None
         self.wing_drag_tensor: dict[str, torch.Tensor] = {}
+        self.wing_stall_tensor: dict[str, torch.Tensor] = {}
+        self.wing_coeff_tensor: dict[str, torch.Tensor] = {}
+        self.wing_q_coeff_tensor: dict[str, torch.Tensor] = {}
 
     def _process_aero_cfg(self) -> None:
         for link_name, wing_cfg in self.cfg.wings.items():
@@ -119,6 +122,7 @@ class FixedWing(Articulation):
         forces = torch.zeros_like(self.data.body_lin_vel_w)
         torques = torch.zeros_like(forces)
         positions = torch.zeros_like(forces)
+        ones = torch.ones(forces.shape[0], device=self.device)
         base_pos = self.data.body_pos_w[:, 0, :]
         delta_q = 0
 
@@ -149,8 +153,9 @@ class FixedWing(Articulation):
 
             drag_coeff = (
                 (
-                    wing_cfg.C_d * torch.sin(aoa) ** 2
-                    + (0.1 + abs(delta_q) * wing_cfg.q_drag) * torch.cos(aoa)
+                    wing_cfg.C_ds
+                    + wing_cfg.C_d * torch.sin(aoa) ** 2
+                    + (delta_q * wing_cfg.q_drag) * torch.cos(aoa) ** 2
                 )
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
@@ -158,26 +163,53 @@ class FixedWing(Articulation):
             )
             drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
 
-            lift_coeff = (
-                (
-                    wing_cfg.C_lt * torch.sin(2 * aoa)
-                    + delta_q * wing_cfg.q_lift * torch.cos(2 * aoa)
+            if wing_cfg.stallable:
+                blend_factor = (
+                    torch.clamp(
+                        (torch.abs(aoa) - wing_cfg.stall_angle) / wing_cfg.stall_range,
+                        0,
+                        1,
+                    )
+                    ** 0.5
                 )
+                blend_factor = blend_factor**3 * (
+                    blend_factor * (blend_factor * 6 - 15) + 10
+                )
+            else:
+                blend_factor = ones
+
+            lift_blended = (1 - blend_factor) * wing_cfg.C_ll * torch.sin(
+                1.9 * aoa
+            ) + blend_factor * wing_cfg.C_lt * torch.sin(1.9 * aoa)
+
+            lift_q_blended = (
+                (1 - blend_factor * (1 - wing_cfg.q_reduced_effectiveness))
+                * delta_q
+                * wing_cfg.q_lift
+                * torch.cos(2 * aoa)
+            )
+
+            lift_coeff = (
+                (lift_blended + lift_q_blended)
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
             )
-            lift_turbulent = (
+            lift = (
                 lift_coeff.unsqueeze(-1)
                 * v_projected_flipped
                 * torch.abs(v_projected_flipped)
             )
 
+            moment_q_blended = (
+                (1 - blend_factor * (1 - wing_cfg.q_reduced_effectiveness))
+                * delta_q
+                * wing_cfg.q_torque
+                * torch.cos(2 * aoa)
+            )
+
             moment_coeff = (
-                (
-                    wing_cfg.C_m * torch.sin(2 * aoa)
-                    + delta_q * wing_cfg.q_torque * torch.cos(2 * aoa)
-                )
+                (wing_cfg.C_m * torch.sin(2 * aoa) + moment_q_blended)
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
@@ -191,7 +223,7 @@ class FixedWing(Articulation):
                 * self.roll_axis
             )
 
-            forces[:, body_idx, :] = drag + lift_turbulent
+            forces[:, body_idx, :] = drag + lift
             torques[:, body_idx, :] = torque + angl_drag
             positions[:, body_idx, :] = quat_apply_inverse(quat_w, p_world - base_pos)
 
