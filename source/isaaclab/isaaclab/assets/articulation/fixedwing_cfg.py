@@ -39,6 +39,9 @@ class FloaterCfg:
         q_drag: float = 0.0,
         q_lift: float = 0.0,
         q_torque: float = 0.0,
+        mixed_airflow: bool = False,
+        influenced_by: str = "",
+        mixed_airflow_coefficient: float = 0.3,
     ):
         self.C_d = C_d
         self.C_ds = C_ds
@@ -57,6 +60,9 @@ class FloaterCfg:
         self.q_drag = q_drag
         self.q_lift = q_lift
         self.q_torque = q_torque
+        self.mixed_airflow = mixed_airflow
+        self.influenced_by = influenced_by
+        self.mixed_airflow_coefficient = mixed_airflow_coefficient
 
 
 class EngineCfg:

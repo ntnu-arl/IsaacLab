@@ -50,7 +50,7 @@ class FixedWing(Articulation):
         self.aero_link_mapping: dict[str, int] = {}
         self.aero_actuator_link_mapping: dict[str, int] = {}
         self.engine_link_mapping: dict[str, int] = {}
-        self.engine_actuator_link_mapping: dict[str, int] = {}
+        self.engine_actuator_idx_mapping: dict[str, int] = {}
 
         self.roll_axis = torch.tensor(
             [0.0, -1.0, 0.0],
@@ -96,7 +96,7 @@ class FixedWing(Articulation):
                 raise ValueError(
                     f"Could not find actuator joint '{actuator_name}' for fixed-wing aerodynamics."
                 )
-            self.engine_actuator_link_mapping[link_name] = actuator_idx
+            self.engine_actuator_idx_mapping[link_name] = actuator_idx
 
     def _initialize_impl(self):
         """Initialize the multirotor implementation."""
@@ -123,8 +123,9 @@ class FixedWing(Articulation):
         torques = torch.zeros_like(forces)
         positions = torch.zeros_like(forces)
         ones = torch.ones(forces.shape[0], device=self.device)
+        unit_z = torch.zeros_like(positions[:, 0, :])
+        unit_z[:, 2] = 1.0
         base_pos = self.data.body_pos_w[:, 0, :]
-        delta_q = 0
 
         for link_name, wing_cfg in self.cfg.wings.items():
             body_idx = self.aero_link_mapping[link_name]
@@ -132,6 +133,23 @@ class FixedWing(Articulation):
             w_world = self.data.body_ang_vel_w[:, body_idx, :]
             p_world = self.data.body_pos_w[:, body_idx, :]
             quat_w = self.data.body_quat_w[:, body_idx, :]
+
+            if wing_cfg.mixed_airflow:
+                influenced_by_body_idx = self.engine_link_mapping[
+                    wing_cfg.influenced_by
+                ]
+                influenced_by_actuator_idx = self.engine_actuator_idx_mapping[
+                    wing_cfg.influenced_by
+                ]
+                v_world += quat_apply(
+                    self.data.body_quat_w[:, influenced_by_body_idx, :],
+                    unit_z
+                    * (
+                        torch.abs(self.data.joint_vel[:, influenced_by_actuator_idx])
+                        * wing_cfg.mixed_airflow_coefficient
+                    ).unsqueeze(-1),
+                )
+                # print(v_world)
 
             v = quat_apply_inverse(quat_w, v_world)
             w = quat_apply_inverse(quat_w, w_world)
@@ -215,7 +233,10 @@ class FixedWing(Articulation):
                 / 2
             )
 
-            angl_drag = -torch.mul(w, self.wing_drag_tensor[link_name])
+            angl_drag = (
+                -torch.mul(w, self.wing_drag_tensor[link_name])
+                * wing_cfg.wing_area_projected
+            )
 
             torque = (
                 moment_coeff.unsqueeze(-1)
@@ -225,7 +246,6 @@ class FixedWing(Articulation):
 
             forces[:, body_idx, :] = drag + lift
             torques[:, body_idx, :] = torque + angl_drag
-            positions[:, body_idx, :] = quat_apply_inverse(quat_w, p_world - base_pos)
 
         self._instantaneous_wrench_composer.add_forces_and_torques(
             self._ALL_INDICES_WP,
@@ -243,28 +263,30 @@ class FixedWing(Articulation):
         torques = torch.zeros_like(forces)
         positions = torch.zeros_like(forces)
         base_pos = self.data.body_pos_w[:, 0, :]
-        v_world = self.data.body_lin_vel_w[:, 0, :]
-        quat_w = self.data.body_quat_w[:, 0, :]
+        unit_z = torch.zeros_like(positions[:, 0, :])
+        unit_z[:, 2] = 1.0
 
         for link_name, engine_cfg in self.cfg.engines.items():
             body_idx = self.engine_link_mapping[link_name]
             p_world = self.data.body_pos_w[:, body_idx, :]
-
+            quat_w = self.data.body_quat_w[:, body_idx, :]
+            v_world = self.data.body_lin_vel_w[:, body_idx, :]
             v = quat_apply_inverse(quat_w, v_world)
 
             rpm = (
-                self.data.joint_vel[:, self.engine_actuator_link_mapping[link_name]]
+                self.data.joint_vel[:, self.engine_actuator_idx_mapping[link_name]]
                 / engine_cfg.max_rpm
             )
 
-            forces[:, body_idx, 0] = torch.clamp(
+            forces[:, body_idx, 2] = torch.clamp(
                 rpm * engine_cfg.thrust_coefficient * engine_cfg.spin_direction
-                - torch.abs(v[:, 0]) * v[:, 0] * engine_cfg.effectiveness,
+                - torch.abs(v[:, 2]) * v[:, 2] * engine_cfg.effectiveness,
                 0,
                 engine_cfg.max_thrust,
             )
-            # torques[:, body_idx, :] = torque
-            positions[:, body_idx, :] = quat_apply_inverse(quat_w, p_world - base_pos)
+            torques[:, 0, :] += (
+                -rpm.unsqueeze(-1) * engine_cfg.torque_coefficient * unit_z
+            )
 
         self._instantaneous_wrench_composer.add_forces_and_torques(
             self._ALL_INDICES_WP,
