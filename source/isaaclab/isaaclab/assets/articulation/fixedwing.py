@@ -262,13 +262,11 @@ class FixedWing(Articulation):
         forces = torch.zeros_like(self.data.body_lin_vel_w)
         torques = torch.zeros_like(forces)
         positions = torch.zeros_like(forces)
-        base_pos = self.data.body_pos_w[:, 0, :]
         unit_z = torch.zeros_like(positions[:, 0, :])
         unit_z[:, 2] = 1.0
 
         for link_name, engine_cfg in self.cfg.engines.items():
             body_idx = self.engine_link_mapping[link_name]
-            p_world = self.data.body_pos_w[:, body_idx, :]
             quat_w = self.data.body_quat_w[:, body_idx, :]
             v_world = self.data.body_lin_vel_w[:, body_idx, :]
             v = quat_apply_inverse(quat_w, v_world)
@@ -284,7 +282,7 @@ class FixedWing(Articulation):
                 0,
                 engine_cfg.max_thrust,
             )
-            torques[:, 0, :] += (
+            torques[:, body_idx, :] += (
                 -rpm.unsqueeze(-1) * engine_cfg.torque_coefficient * unit_z
             )
 
