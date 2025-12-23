@@ -71,7 +71,7 @@ class FixedWing(Articulation):
                 )
             self.aero_link_mapping[link_names[0]] = body_idx[0]
             self.wing_drag_tensor[link_name] = torch.tensor(
-                [wing_cfg.agl_dr, wing_cfg.agl_dp, 0.0], device=self._device
+                [wing_cfg.C_rdr, wing_cfg.C_rdp, 0.0], device=self._device
             )
 
             if wing_cfg.has_controlsurface:
@@ -125,13 +125,11 @@ class FixedWing(Articulation):
         ones = torch.ones(forces.shape[0], device=self.device)
         unit_z = torch.zeros_like(positions[:, 0, :])
         unit_z[:, 2] = 1.0
-        base_pos = self.data.body_pos_w[:, 0, :]
 
         for link_name, wing_cfg in self.cfg.wings.items():
             body_idx = self.aero_link_mapping[link_name]
             v_world = self.data.body_lin_vel_w[:, body_idx, :]
             w_world = self.data.body_ang_vel_w[:, body_idx, :]
-            p_world = self.data.body_pos_w[:, body_idx, :]
             quat_w = self.data.body_quat_w[:, body_idx, :]
 
             if wing_cfg.mixed_airflow:
@@ -233,10 +231,7 @@ class FixedWing(Articulation):
                 / 2
             )
 
-            angl_drag = (
-                -torch.mul(w, self.wing_drag_tensor[link_name])
-                * wing_cfg.wing_area_projected
-            )
+            angl_drag = -torch.mul(w * torch.abs(w), self.wing_drag_tensor[link_name])
 
             torque = (
                 moment_coeff.unsqueeze(-1)
