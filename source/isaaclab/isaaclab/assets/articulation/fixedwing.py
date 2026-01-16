@@ -61,6 +61,7 @@ class FixedWing(Articulation):
         self.wing_stall_tensor: dict[str, torch.Tensor] = {}
         self.wing_coeff_tensor: dict[str, torch.Tensor] = {}
         self.wing_q_coeff_tensor: dict[str, torch.Tensor] = {}
+        self._debug_drawer = None
 
     def _process_aero_cfg(self) -> None:
         for link_name, wing_cfg in self.cfg.wings.items():
@@ -109,6 +110,22 @@ class FixedWing(Articulation):
 
         # Create thruster buffers with correct size (SINGLE PHASE)
         self._process_aero_cfg()
+
+    def set_debug_drawer(self, debug_drawer) -> None:
+        self._debug_drawer = debug_drawer
+
+    def draw_velocity_vectors(self, scale: float = 1.0) -> None:
+        """Draw velocity vectors of root link."""
+        if self._debug_drawer is None:
+            return
+        pos = self.data.body_pos_w[:, 0, :]
+        vel = self.data.body_lin_vel_w[:, 0, :]
+        self._debug_drawer.draw_arrow(
+            origins=pos,
+            vectors=vel * scale,
+            colors=torch.tensor([0.0, 0.4, 1.0], device=self.device),
+            radius=0.05,
+        )
 
     def write_data_to_sim(self):
         # self._apply_drag()
@@ -272,13 +289,16 @@ class FixedWing(Articulation):
             )
 
             forces[:, body_idx, 2] = torch.clamp(
-                rpm * engine_cfg.thrust_coefficient * engine_cfg.spin_direction
+                rpm * engine_cfg.thrust_coefficient
                 - torch.abs(v[:, 2]) * v[:, 2] * engine_cfg.effectiveness,
                 0,
                 engine_cfg.max_thrust,
             )
             torques[:, body_idx, :] += (
-                -rpm.unsqueeze(-1) * engine_cfg.torque_coefficient * unit_z
+                -rpm.unsqueeze(-1)
+                * engine_cfg.torque_coefficient
+                * unit_z
+                * engine_cfg.spin_direction
             )
 
         self._instantaneous_wrench_composer.add_forces_and_torques(
