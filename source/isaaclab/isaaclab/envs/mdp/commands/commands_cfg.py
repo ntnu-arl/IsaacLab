@@ -8,13 +8,21 @@ from dataclasses import MISSING
 
 from isaaclab.managers import CommandTermCfg
 from isaaclab.markers import VisualizationMarkersCfg
-from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
+from isaaclab.markers.config import (
+    BLUE_ARROW_X_MARKER_CFG,
+    FRAME_MARKER_CFG,
+    GREEN_ARROW_X_MARKER_CFG,
+)
 from isaaclab.utils import configclass
 
 from .null_command import NullCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
-from .velocity_command import NormalVelocityCommand, UniformVelocityCommand
+from .velocity_command import (
+    NormalVelocityCommand,
+    UniformVelocityCommand,
+    UniformAirspeedHeadingCommand,
+)
 
 
 @configclass
@@ -86,8 +94,8 @@ class UniformVelocityCommandCfg(CommandTermCfg):
     )
     """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
 
-    current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_current"
+    current_vel_visualizer_cfg: VisualizationMarkersCfg = (
+        BLUE_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_current")
     )
     """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
 
@@ -101,7 +109,9 @@ class NormalVelocityCommandCfg(UniformVelocityCommandCfg):
     """Configuration for the normal velocity command generator."""
 
     class_type: type = NormalVelocityCommand
-    heading_command: bool = False  # --> we don't use heading command for normal velocity command.
+    heading_command: bool = (
+        False  # --> we don't use heading command for normal velocity command.
+    )
 
     @configclass
     class Ranges:
@@ -172,7 +182,9 @@ class UniformPoseCommandCfg(CommandTermCfg):
     ranges: Ranges = MISSING
     """Ranges for the commands."""
 
-    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
     """The configuration for the goal pose visualization marker. Defaults to FRAME_MARKER_CFG."""
 
     current_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
@@ -219,8 +231,8 @@ class UniformPose2dCommandCfg(CommandTermCfg):
     ranges: Ranges = MISSING
     """Distribution ranges for the position commands."""
 
-    goal_pose_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/pose_goal"
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = (
+        GREEN_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/pose_goal")
     )
     """The configuration for the goal pose visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
 
@@ -246,3 +258,54 @@ class TerrainBasedPose2dCommandCfg(UniformPose2dCommandCfg):
 
     ranges: Ranges = MISSING
     """Distribution ranges for the sampled commands."""
+
+
+@configclass
+class UniformAirspeedHeadingCommandCfg(CommandTermCfg):
+    """Configuration for the uniform velocity command generator."""
+
+    class_type: type = UniformAirspeedHeadingCommand
+
+    asset_name: str = MISSING
+    """Name of the asset in the environment for which the commands are generated."""
+
+    alt_command: bool = False
+    """Whether to use heading command or angular velocity command. Defaults to False.
+
+    If True, the angular velocity command is computed from the heading error, where the
+    target heading is sampled uniformly from provided range. Otherwise, the angular velocity
+    command is sampled uniformly from provided range.
+    """
+
+    @configclass
+    class Ranges:
+        """Uniform distribution ranges for the velocity commands."""
+
+        airspeed: tuple[float, float] = MISSING
+        """Range for the airspeed command (in m/s)."""
+
+        heading: tuple[float, float] = MISSING
+        """Range for the heading command (in rad)."""
+
+        vertical_speed: tuple[float, float] = MISSING
+        """Range for the linear-z velocity command (in m/s)."""
+
+        altitude: tuple[float, float] | None = None
+        """Range for the altitude command (in m)."""
+
+    ranges: Ranges = MISSING
+    """Distribution ranges for the velocity commands."""
+
+    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/velocity_goal"
+    )
+    """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
+
+    current_vel_visualizer_cfg: VisualizationMarkersCfg = (
+        BLUE_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_current")
+    )
+    """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
+
+    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
+    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
+    current_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
