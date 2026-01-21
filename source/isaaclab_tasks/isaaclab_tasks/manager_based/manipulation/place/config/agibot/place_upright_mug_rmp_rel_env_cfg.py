@@ -1,12 +1,10 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
 import os
 from dataclasses import MISSING
-
-from isaaclab_assets import ISAACLAB_ASSETS_DATA_DIR
 
 from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 from isaaclab.devices.device_base import DevicesCfg
@@ -23,7 +21,7 @@ from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 
 from isaaclab_tasks.manager_based.manipulation.place import mdp as place_mdp
 from isaaclab_tasks.manager_based.manipulation.place.config.agibot import place_toy2box_rmp_rel_env_cfg
@@ -153,6 +151,7 @@ Env to Place Upright Mug with AgiBot Left Arm using RMPFlow
 
 
 class RmpFlowAgibotPlaceUprightMugEnvCfg(place_toy2box_rmp_rel_env_cfg.PlaceToy2BoxEnvCfg):
+    """Configuration for the Agibot Place Upright Mug RMP Rel Environment."""
 
     def __post_init__(self):
         # post init of parent
@@ -229,7 +228,7 @@ class RmpFlowAgibotPlaceUprightMugEnvCfg(place_toy2box_rmp_rel_env_cfg.PlaceToy2
             prim_path="{ENV_REGEX_NS}/Mug",
             init_state=RigidObjectCfg.InitialStateCfg(),
             spawn=UsdFileCfg(
-                usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Objects/mug.usd",
+                usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Objects/Mug/mug.usd",
                 scale=(1.0, 1.0, 1.0),
                 rigid_props=mug_properties,
             ),

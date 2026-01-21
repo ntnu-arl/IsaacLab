@@ -1,10 +1,14 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
 
 from isaaclab.assets import RigidObjectCfg, SurfaceGripperCfg
+from isaaclab.devices import DevicesCfg
+from isaaclab.devices.device_base import DeviceBase
+from isaaclab.devices.openxr.openxr_device import OpenXRDeviceCfg
+from isaaclab.devices.openxr.retargeters import GripperRetargeterCfg, Se3AbsRetargeterCfg
 from isaaclab.envs.mdp.actions.actions_cfg import SurfaceGripperBinaryActionCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -12,7 +16,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
-from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
+from isaaclab.sim.schemas.schemas_cfg import CollisionPropertiesCfg, RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -52,6 +56,7 @@ class EventCfg:
 
 @configclass
 class ObservationGalbotLeftArmGripperCfg:
+    """Observations for the Galbot Left Arm Gripper."""
 
     @configclass
     class PolicyCfg(ObsGroup):
@@ -152,7 +157,6 @@ class ObservationGalbotLeftArmGripperCfg:
 
 @configclass
 class GalbotLeftArmCubeStackEnvCfg(StackEnvCfg):
-
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -190,6 +194,7 @@ class GalbotLeftArmCubeStackEnvCfg(StackEnvCfg):
             max_depenetration_velocity=5.0,
             disable_gravity=False,
         )
+        cube_collision_properties = CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0)
 
         # Set each stacking cube deterministically
         self.scene.cube_1 = RigidObjectCfg(
@@ -199,6 +204,7 @@ class GalbotLeftArmCubeStackEnvCfg(StackEnvCfg):
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/blue_block.usd",
                 scale=(1.0, 1.0, 1.0),
                 rigid_props=cube_properties,
+                collision_props=cube_collision_properties,
             ),
         )
         self.scene.cube_2 = RigidObjectCfg(
@@ -208,6 +214,7 @@ class GalbotLeftArmCubeStackEnvCfg(StackEnvCfg):
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/red_block.usd",
                 scale=(1.0, 1.0, 1.0),
                 rigid_props=cube_properties,
+                collision_props=cube_collision_properties,
             ),
         )
         self.scene.cube_3 = RigidObjectCfg(
@@ -217,6 +224,7 @@ class GalbotLeftArmCubeStackEnvCfg(StackEnvCfg):
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/green_block.usd",
                 scale=(1.0, 1.0, 1.0),
                 rigid_props=cube_properties,
+                collision_props=cube_collision_properties,
             ),
         )
 
@@ -240,19 +248,37 @@ class GalbotLeftArmCubeStackEnvCfg(StackEnvCfg):
             ],
         )
 
+        self.teleop_devices = DevicesCfg(
+            devices={
+                "handtracking": OpenXRDeviceCfg(
+                    retargeters=[
+                        Se3AbsRetargeterCfg(
+                            bound_hand=DeviceBase.TrackingTarget.HAND_LEFT,
+                            zero_out_xy_rotation=True,
+                            use_wrist_rotation=False,
+                            use_wrist_position=True,
+                            sim_device=self.sim.device,
+                        ),
+                        GripperRetargeterCfg(
+                            bound_hand=DeviceBase.TrackingTarget.HAND_LEFT, sim_device=self.sim.device
+                        ),
+                    ],
+                    sim_device=self.sim.device,
+                    xr_cfg=self.xr,
+                ),
+            }
+        )
+
 
 @configclass
 class GalbotRightArmCubeStackEnvCfg(GalbotLeftArmCubeStackEnvCfg):
-
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
-        l, r = self.events.randomize_cube_positions.params["pose_range"]["y"]
-        self.events.randomize_cube_positions.params["pose_range"]["y"] = (
-            -r,
-            -l,
-        )  # move to area below right hand
+        # Move to area below right hand (invert y-axis)
+        left, right = self.events.randomize_cube_positions.params["pose_range"]["y"]
+        self.events.randomize_cube_positions.params["pose_range"]["y"] = (-right, -left)
 
         # Set actions for the specific robot type (galbot)
         self.actions.arm_action = mdp.JointPositionActionCfg(
@@ -262,7 +288,7 @@ class GalbotRightArmCubeStackEnvCfg(GalbotLeftArmCubeStackEnvCfg):
         # Set surface gripper: Ensure the SurfaceGripper prim has the required attributes
         self.scene.surface_gripper = SurfaceGripperCfg(
             prim_path="{ENV_REGEX_NS}/Robot/right_suction_cup_tcp_link/SurfaceGripper",
-            max_grip_distance=0.02,
+            max_grip_distance=0.0075,
             shear_force_limit=5000.0,
             coaxial_force_limit=5000.0,
             retry_interval=0.05,
@@ -276,3 +302,24 @@ class GalbotRightArmCubeStackEnvCfg(GalbotLeftArmCubeStackEnvCfg):
         )
 
         self.scene.ee_frame.target_frames[0].prim_path = "{ENV_REGEX_NS}/Robot/right_suction_cup_tcp_link"
+
+        self.teleop_devices = DevicesCfg(
+            devices={
+                "handtracking": OpenXRDeviceCfg(
+                    retargeters=[
+                        Se3AbsRetargeterCfg(
+                            bound_hand=DeviceBase.TrackingTarget.HAND_RIGHT,
+                            zero_out_xy_rotation=True,
+                            use_wrist_rotation=False,
+                            use_wrist_position=True,
+                            sim_device=self.sim.device,
+                        ),
+                        GripperRetargeterCfg(
+                            bound_hand=DeviceBase.TrackingTarget.HAND_RIGHT, sim_device=self.sim.device
+                        ),
+                    ],
+                    sim_device=self.sim.device,
+                    xr_cfg=self.xr,
+                ),
+            }
+        )

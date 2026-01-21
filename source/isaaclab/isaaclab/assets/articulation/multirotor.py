@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -9,26 +9,22 @@
 from __future__ import annotations
 
 import os
+
 os.environ["OMNI_PHYSX_TENSORS_WARNINGS"] = "0"
 
-import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from .articulation import Articulation
+import torch
 
 import omni.log
-from omni.physics.tensors import JointType
-from isaacsim.core.simulation_manager import SimulationManager
-from isaacsim.core.version import get_version
-from pxr import UsdPhysics
 
-import isaaclab.sim as sim_utils
-import isaaclab.utils.math as math_utils
 import isaaclab.utils.string as string_utils
-from isaaclab.utils.types import ArticulationThrustActions
-from isaaclab.actuators import ThrusterCfg, Thruster, ActuatorBase
+from isaaclab.actuators import Thruster
 from isaaclab.assets.articulation.multirotor_data import MultirotorData
+from isaaclab.utils.types import ArticulationThrustActions
+
+from .articulation import Articulation
 
 if TYPE_CHECKING:
     from .multirotor_cfg import MultirotorCfg
@@ -38,8 +34,8 @@ class Multirotor(Articulation):
     """A multirotor articulation asset class.
 
     This class extends the base articulation class to support multirotor vehicles
-    with thruster actuators that can be applied at specific body locations. It maintains 
-    full compatibility with the base articulation functionality while adding 
+    with thruster actuators that can be applied at specific body locations. It maintains
+    full compatibility with the base articulation functionality while adding
     multirotor-specific features.
 
     The class supports various multirotor configurations (quadcopter, hexacopter, etc.)
@@ -73,39 +69,36 @@ class Multirotor(Articulation):
     @property
     def thruster_names(self) -> list[str]:
         """Ordered names of thrusters in the multirotor."""
-        if not hasattr(self, 'actuators') or not self.actuators:
+        if not hasattr(self, "actuators") or not self.actuators:
             return []
-        
+
         thruster_names = []
         for actuator in self.actuators.values():
-            if hasattr(actuator, 'thruster_names'):
+            if hasattr(actuator, "thruster_names"):
                 thruster_names.extend(actuator.thruster_names)
-        
+
         return thruster_names
 
     @property
     def num_thrusters(self) -> int:
         """Number of thrusters in the multirotor."""
         return len(self.thruster_names)
-    
+
     @property
     def _allocation_matrix(self) -> torch.Tensor:
         """Allocation matrix for control allocation."""
         return torch.tensor(self.cfg.allocation_matrix, device=self.device, dtype=torch.float32)
-    
+
     """
-    Operations 
+    Operations
     """
 
     def find_thrusters(
-        self, 
-        name_keys: str | Sequence[str], 
-        thruster_subset: list[str] | None = None, 
-        preserve_order: bool = False
+        self, name_keys: str | Sequence[str], thruster_subset: list[str] | None = None, preserve_order: bool = False
     ) -> tuple[list[int], list[str]]:
         """Find thrusters in the multirotor based on the name keys.
 
-        This method identifies thrusters based on body names containing 'thruster', 'prop', 
+        This method identifies thrusters based on body names containing 'thruster', 'prop',
         'motor', 'rotor', or explicit naming patterns common in multirotor configurations.
 
         Args:
@@ -124,8 +117,7 @@ class Multirotor(Articulation):
             # Look for bodies with multirotor-related keywords
             multirotor_keywords = ["thruster", "prop", "motor", "rotor"]
             thruster_subset = [
-                name for name in self.body_names 
-                if any(keyword in name.lower() for keyword in multirotor_keywords)
+                name for name in self.body_names if any(keyword in name.lower() for keyword in multirotor_keywords)
             ]
             # If no bodies found, raise an error instead of falling back to joints
             if not thruster_subset:
@@ -133,14 +125,14 @@ class Multirotor(Articulation):
                     f"No thruster bodies found in body names: {self.body_names}. "
                     f"Thruster bodies should contain one of: {multirotor_keywords}"
                 )
-        
+
         return string_utils.resolve_matching_names(name_keys, thruster_subset, preserve_order)
 
     def set_thrust_target(
-        self, 
-        target: torch.Tensor, 
-        thruster_ids: Sequence[int] | slice | None = None, 
-        env_ids: Sequence[int] | None = None
+        self,
+        target: torch.Tensor,
+        thruster_ids: Sequence[int] | slice | None = None,
+        env_ids: Sequence[int] | None = None,
     ):
         """Set target thrust values for thrusters.
 
@@ -154,11 +146,11 @@ class Multirotor(Articulation):
             env_ids = slice(None)
         if thruster_ids is None:
             thruster_ids = slice(None)
-        
+
         # broadcast env_ids if needed to allow double indexing
         if env_ids != slice(None) and thruster_ids != slice(None):
             env_ids = env_ids[:, None]
-        
+
         # set targets
         self._data.thrust_target[env_ids, thruster_ids] = target
 
@@ -170,13 +162,13 @@ class Multirotor(Articulation):
         """
         # call parent reset
         super().reset(env_ids)
-        
+
         # reset multirotor-specific data
         if env_ids is None:
             env_ids = torch.arange(self.num_instances, device=self.device)
         else:
             env_ids = torch.tensor(env_ids, device=self.device)
-        
+
         # reset thruster targets to default values
         if self._data.thrust_target is not None and self._data.default_thruster_rps is not None:
             self._data.thrust_target[env_ids] = self._data.default_thruster_rps[env_ids]
@@ -188,33 +180,32 @@ class Multirotor(Articulation):
     #     # apply thruster forces at individual locations
     #     self._apply_thruster_forces_and_torques()
 
-
     def _initialize_impl(self):
         """Initialize the multirotor implementation."""
         # call parent initialization
         super()._initialize_impl()
-        
+
         # Replace data container with MultirotorData
         self._data = MultirotorData(self.root_physx_view, self.device)
-        
+
         # Create thruster buffers
         self._create_thruster_buffers()
-        
+
         # Process thruster configuration (this replaces the parent's actuator processing)
         self._process_thruster_cfg()
-        
+
         # Update thruster buffers with actual sizes after actuators are created
         self._update_thruster_buffers()
-        
+
         # Process configuration
         self._process_cfg()
-        
+
         # Update the robot data
         self.update(0.0)
-        
+
         # Log multirotor information
         self._log_multirotor_info()
-    
+
     def _process_actuators_cfg(self):
         """Override parent method to do nothing - we handle thrusters separately."""
         # Do nothing - we handle thruster processing in _process_thruster_cfg() otherwise this
@@ -226,20 +217,20 @@ class Multirotor(Articulation):
         # Create placeholder buffers with reasonable defaults
         num_instances = self.num_instances
         num_thrusters = 4  # Reasonable default for most multirotors
-        
+
         # Create placeholder thruster data tensors
         self._data.default_thruster_rps = torch.zeros(num_instances, num_thrusters, device=self.device)
         self._data.thrust_target = torch.zeros(num_instances, num_thrusters, device=self.device)
         self._data.computed_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
         self._data.applied_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
-        
+
         # FIX: Combined wrench buffers with correct shape
         self._thrust_target_sim = torch.zeros_like(self._data.thrust_target)
         self._internal_wrench_target_sim = torch.zeros(num_instances, 6, device=self.device)
         # Shape should match the external force buffers: (num_envs, num_bodies, 3)
         self._internal_force_target_sim = torch.zeros(num_instances, self.num_bodies, 3, device=self.device)
         self._internal_torque_target_sim = torch.zeros(num_instances, self.num_bodies, 3, device=self.device)
-        
+
         # Placeholder thruster names
         self._data.thruster_names = [f"thruster_{i}" for i in range(num_thrusters)]
 
@@ -248,15 +239,15 @@ class Multirotor(Articulation):
         # Get actual number of thrusters
         num_instances = self.num_instances
         num_thrusters = self.num_thrusters
-        
+
         # Resize buffers to match actual thruster count
         self._data.default_thruster_rps = torch.zeros(num_instances, num_thrusters, device=self.device)
         self._data.thrust_target = torch.zeros(num_instances, num_thrusters, device=self.device)
         self._data.computed_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
         self._data.applied_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
-        
+
         self._thrust_target_sim = torch.zeros(num_instances, num_thrusters, device=self.device)
-        
+
         # Set actual thruster names
         self._data.thruster_names = self.thruster_names
 
@@ -271,12 +262,13 @@ class Multirotor(Articulation):
         )
         default_root_state = torch.tensor(default_root_state, dtype=torch.float, device=self.device)
         self._data.default_root_state = default_root_state.repeat(self.num_instances, 1)
-        
+
         # Handle thruster-specific initial state
-        if hasattr(self._data, 'default_thruster_rps') and hasattr(self.cfg.init_state, 'rps'):
+        if hasattr(self._data, "default_thruster_rps") and hasattr(self.cfg.init_state, "rps"):
             # Match against thruster names (not body names!)
             indices_list, _, values_list = string_utils.resolve_matching_names_values(
-                self.cfg.init_state.rps, self.thruster_names  # ← Use thruster_names, not body_names
+                self.cfg.init_state.rps,
+                self.thruster_names,  # ← Use thruster_names, not body_names
             )
             if indices_list:
                 rps_values = torch.tensor(values_list, device=self.device)
@@ -285,7 +277,7 @@ class Multirotor(Articulation):
 
     def _process_thruster_cfg(self):
         """Process and apply multirotor thruster properties.
-        
+
         This method only handles thruster actuators. Mixed configurations with
         both thrusters and regular joints are not supported.
         """
@@ -297,44 +289,44 @@ class Multirotor(Articulation):
         # Check for mixed configurations
         has_thrusters = False
         has_joints = False
-        
+
         for actuator_name, actuator_cfg in self.cfg.actuators.items():
-            if hasattr(actuator_cfg, 'thruster_names_expr'):
+            if hasattr(actuator_cfg, "thruster_names_expr"):
                 has_thrusters = True
-            elif hasattr(actuator_cfg, 'joint_names_expr'):
+            elif hasattr(actuator_cfg, "joint_names_expr"):
                 has_joints = True
-        
+
         # Throw error for mixed configurations
         if has_thrusters and has_joints:
             raise ValueError(
                 "Mixed configurations with both thrusters and regular joints are not supported. "
                 "Please use either pure thruster configuration or pure joint configuration."
             )
-        
+
         # If we have regular joints, throw error (not supported in Multirotor class)
         if has_joints:
             raise ValueError(
                 "Regular joint actuators are not supported in Multirotor class. "
                 "Please use the base Articulation class for joint-based systems."
             )
-            
+
         # Store the body-to-thruster mapping at the class level
         self._thruster_body_mapping = {}
-        
+
         for actuator_name, actuator_cfg in self.cfg.actuators.items():
             # Find thruster bodies
             body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr)
-            
+
             # Create 0-based thruster array indices
             thruster_array_indices = list(range(len(body_indices)))
-            
+
             # Store the mapping
             self._thruster_body_mapping[actuator_name] = {
-                'body_indices': body_indices,  # [1, 2, 3, 4]
-                'array_indices': thruster_array_indices,  # [0, 1, 2, 3]
-                'thruster_names': thruster_names
+                "body_indices": body_indices,  # [1, 2, 3, 4]
+                "array_indices": thruster_array_indices,  # [0, 1, 2, 3]
+                "thruster_names": thruster_names,
             }
-            
+
             # Create thruster actuator
             actuator: Thruster = actuator_cfg.class_type(
                 cfg=actuator_cfg,
@@ -342,12 +334,12 @@ class Multirotor(Articulation):
                 thruster_ids=thruster_array_indices,
                 num_envs=self.num_instances,
                 device=self.device,
-                init_thruster_rps=self._data.default_thruster_rps
+                init_thruster_rps=self._data.default_thruster_rps,
             )
-            
+
             # Store actuator
             self.actuators[actuator_name] = actuator
-            
+
             # Log information
             omni.log.info(
                 f"Thruster actuator: {actuator_name} with model '{actuator_cfg.class_type.__name__}'"
@@ -363,12 +355,12 @@ class Multirotor(Articulation):
         The actions are first processed using actuator models. The thruster actuator models
         compute the thruster level simulation commands and sets them into the PhysX buffers.
         """
-        
+
         # process thruster actions per group
         for actuator in self.actuators.values():
             if not isinstance(actuator, Thruster):
                 continue
-            
+
             # prepare input for actuator model based on cached data
             control_action = ArticulationThrustActions(
                 thrusts=self._data.thrust_target[:, actuator.thruster_indices],
@@ -377,11 +369,11 @@ class Multirotor(Articulation):
 
             # compute thruster command from the actuator model
             control_action = actuator.compute(control_action)
-            
+
             # update targets (these are set into the simulation)
             if control_action.thrusts is not None:
                 self._thrust_target_sim[:, actuator.thruster_indices] = control_action.thrusts
-            
+
             # update state of the actuator model
             self._data.computed_thrust[:, actuator.thruster_indices] = actuator.computed_thrust
             self._data.applied_thrust[:, actuator.thruster_indices] = actuator.applied_thrust
@@ -394,63 +386,63 @@ class Multirotor(Articulation):
     #         self._apply_combined_wrench()
     #     else:
     #         raise ValueError(f"Unknown force application mode: {self.cfg.force_application_mode}")
-    
+
     # def _apply_individual_thruster_forces_and_torques(self):
     #     """Apply individual thruster forces at their respective body locations."""
-    #     # get current body poses 
+    #     # get current body poses
     #     body_poses = self.data.body_link_pose_w
-        
+
     #     # Create full force/torque tensors for ALL bodies across ALL environments
     #     # Shape: (num_envs * num_bodies, 3) = (48 * 5, 3) = (240, 3)
     #     all_forces = torch.zeros(self.num_instances * self.num_bodies, 3, device=self.device)
     #     all_torques = torch.zeros(self.num_instances * self.num_bodies, 3, device=self.device)
-        
+
     #     # apply forces for each thruster actuator group
     #     for actuator_name, actuator in self.actuators.items():
     #         if not isinstance(actuator, Thruster):
     #             continue
-                
+
     #         # Get the mapping for this actuator
     #         mapping = self._thruster_body_mapping[actuator_name]
     #         body_indices = mapping['body_indices']  # [1, 2, 3, 4]
-            
+
     #         # Use the applied thrust from the data container (updated in _apply_actuator_model)
     #         thruster_forces = self._data.applied_thrust[:, actuator.thruster_indices]  # Shape: (num_envs, 4)
-            
+
     #         # apply forces at each thruster location
     #         for i, thruster_name in enumerate(actuator.thruster_names):
     #             body_idx = body_indices[i]  # Use the stored body index from mapping
-                
+
     #             # get thruster force magnitude
     #             force_magnitude = thruster_forces[:, i]  # (num_envs,)
     #             torque_magnitude = force_magnitude * actuator.cfg.torque_to_thrust_ratio  # (num_envs,)
-                
+
     #             # Force is along the local Z-axis of the thruster body
     #             # Don't transform to world frame - PhysX will do that when is_global=False
     #             local_force_dir = torch.tensor(
     #                 self.cfg.thruster_force_direction, device=self.device
     #             ).expand(self.num_instances, -1)  # Shape: (num_envs, 3) - typically [0, 0, 1]
-                
+
     #             # Calculate local force (in thruster body's local frame)
     #             local_force = local_force_dir * force_magnitude.unsqueeze(-1)  # (num_envs, 3)
-                
+
     #             # Get rotor direction for this thruster
     #             rotor_direction = 1.0  # default counter-clockwise
     #             if self.cfg.rotor_directions is not None and i < len(self.cfg.rotor_directions):
     #                 rotor_direction = float(self.cfg.rotor_directions[i])
-                
+
     #             # Torque is also along the local Z-axis (around the thrust axis)
     #             # For a rotor, the reaction torque is along the spin axis (Z-axis)
     #             local_torque = local_force_dir * torque_magnitude.unsqueeze(-1) * rotor_direction  # (num_envs, 3)
-                
+
     #             # Calculate the flattened indices for this body across all environments
     #             # Format: [env0_body_idx, env1_body_idx, env2_body_idx, ...]
     #             indices = torch.arange(self.num_instances, device=self.device) * self.num_bodies + body_idx
-                
+
     #             # Set forces only for this specific body across all environments
     #             all_forces[indices] = local_force
     #             all_torques[indices] = local_torque
-        
+
     #     # Apply all forces at once in LOCAL frame (like combined mode)
     #     self.root_physx_view.apply_forces_and_torques_at_position(
     #         force_data=all_forces,  # Shape: (240, 3) - forces in LOCAL frame
@@ -459,16 +451,16 @@ class Multirotor(Articulation):
     #         indices=self._ALL_INDICES,  # Use ALL_INDICES like IsaacLab examples
     #         is_global=False  # Forces/torques are in LOCAL frame - PhysX transforms to world
     #     )
-        
+
     #     print(f"Applied forces to PhysX - checking if call succeeded")
     #     print(f"Checking body velocities after apply:")
-    #     print(f"Body velocities[0, 1:5]: {self.data.body_lin_vel_w[0, 1:5]}")  
-    
+    #     print(f"Body velocities[0, 1:5]: {self.data.body_lin_vel_w[0, 1:5]}")
+
     # def _apply_combined_wrench(self):
     #     """Apply combined wrench to the base link (like articulation_with_thrusters.py)."""
     #     # Combine individual thrusts into a wrench vector
     #     self._combine_thrusts()
-        
+
     #     self.root_physx_view.apply_forces_and_torques_at_position(
     #         force_data=self._internal_force_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
     #         torque_data=self._internal_torque_target_sim.view(-1, 3),  # Shape: (num_envs * num_bodies, 3)
@@ -476,7 +468,7 @@ class Multirotor(Articulation):
     #         indices=self._ALL_INDICES,  # Use ALL_INDICES
     #         is_global=False  # Forces are in local frame
     #     )
-    
+
     # def _combine_thrusts(self):
     #     """Combine individual thrusts into a wrench vector."""
     #     thrusts = self._thrust_target_sim
@@ -484,8 +476,7 @@ class Multirotor(Articulation):
     #     # Apply forces to base link (body index 0) only
     #     self._internal_force_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, :3]
     #     self._internal_torque_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, 3:]
-    
-    
+
     def _set_thruster_forces_to_buffers(self):
         """Set thruster forces using composable wrench API based on the configured mode."""
         if self.cfg.force_application_mode == "individual":
@@ -494,95 +485,95 @@ class Multirotor(Articulation):
             self._set_combined_wrench()
         else:
             raise ValueError(f"Unknown force application mode: {self.cfg.force_application_mode}")
-    
+
     def _set_individual_thruster_forces_composable(self):
         """Set individual thruster forces using the NEW composable wrench API from PR #3287."""
         # Reset the wrench composer at the start
         self.reset_composable_force_and_torque()
-        
+
         # Add forces for each thruster using the composable API
         for actuator_name, actuator in self.actuators.items():
             if not isinstance(actuator, Thruster):
                 continue
-                
+
             mapping = self._thruster_body_mapping[actuator_name]
-            body_indices = mapping['body_indices']  # [1, 2, 3, 4]
-            
+            body_indices = mapping["body_indices"]  # [1, 2, 3, 4]
+
             thruster_forces = self._data.applied_thrust[:, actuator.thruster_indices]
-            
+
             for i, thruster_name in enumerate(actuator.thruster_names):
                 body_idx = body_indices[i]
-                
+
                 force_magnitude = thruster_forces[:, i]
                 torque_magnitude = force_magnitude * actuator.cfg.torque_to_thrust_ratio
-                
+
                 # Force in local frame (along Z-axis)
-                local_force_dir = torch.tensor(
-                    self.cfg.thruster_force_direction, device=self.device
-                ).expand(self.num_instances, -1)
-                
+                local_force_dir = torch.tensor(self.cfg.thruster_force_direction, device=self.device).expand(
+                    self.num_instances, -1
+                )
+
                 local_force = local_force_dir * force_magnitude.unsqueeze(-1)
-                
+
                 # Torque in local frame (around Z-axis)
                 rotor_direction = 1.0
                 if self.cfg.rotor_directions is not None and i < len(self.cfg.rotor_directions):
                     rotor_direction = float(self.cfg.rotor_directions[i])
-                
+
                 local_torque = local_force_dir * torque_magnitude.unsqueeze(-1) * rotor_direction
-                
+
                 # Add this thruster's force using composable API
                 # Shape needs to be (num_envs, 1, 3) for single body
                 self.add_composable_force_and_torque(
-                    forces=local_force.unsqueeze(1),      # (num_envs, 1, 3)
-                    torques=local_torque.unsqueeze(1),    # (num_envs, 1, 3)
-                    body_ids=[body_idx],                   # Single body
-                    env_ids=None,                          # All environments
-                    is_global=False                        # Local frame
+                    forces=local_force.unsqueeze(1),  # (num_envs, 1, 3)
+                    torques=local_torque.unsqueeze(1),  # (num_envs, 1, 3)
+                    body_ids=[body_idx],  # Single body
+                    env_ids=None,  # All environments
+                    is_global=False,  # Local frame
                 )
-        
+
         # Debug print
-        print(f"\n=== Individual Forces via Composable API ===")
+        print("\n=== Individual Forces via Composable API ===")
         print(f"Composed forces[0]: {self._wrench_composer.composed_force_as_torch[0]}")
         print(f"Composed torques[0]: {self._wrench_composer.composed_torque_as_torch[0]}")
-    
+
     def _set_combined_wrench(self):
         """Set combined wrench to the base link."""
         # Reset the wrench composer
         self.reset_composable_force_and_torque()
-        
+
         # Combine thrusts using allocation matrix
         thrusts = self._thrust_target_sim
         wrench = (self._allocation_matrix @ thrusts.T).T  # Shape: (num_envs, 6)
-        
+
         # Prepare forces and torques for base link only
         forces = wrench[:, :3].unsqueeze(1)  # Shape: (num_envs, 1, 3)
         torques = wrench[:, 3:].unsqueeze(1)  # Shape: (num_envs, 1, 3)
-        
+
         # Add to base link using composable API
         self.add_composable_force_and_torque(
             forces=forces,
             torques=torques,
             body_ids=[0],  # Base link only
             env_ids=None,  # All environments
-            is_global=False  # Local frame
+            is_global=False,  # Local frame
         )
-        
+
         # Debug print
-        print(f"\n=== Combined Wrench via Composable API ===")
+        print("\n=== Combined Wrench via Composable API ===")
         print(f"forces[0]: {forces[0]}")
         print(f"torques[0]: {torques[0]}")
-        
+
     def write_data_to_sim(self):
         """Write thrust and torque commands to the simulation."""
         # Apply actuator model to compute thrust values
         self._apply_actuator_model()
-        
+
         # Set thruster forces using composable API
         self._set_thruster_forces_to_buffers()
-        
+
         # Call parent to apply composed forces
         super().write_data_to_sim()
-    
+
     def _validate_cfg(self):
         """Validate the multirotor configuration after processing.
 
@@ -591,7 +582,7 @@ class Multirotor(Articulation):
             created. Otherwise, some settings that are altered during processing may not be validated.
         """
         # Only validate if actuators have been created
-        if hasattr(self, 'actuators') and self.actuators:
+        if hasattr(self, "actuators") and self.actuators:
             # Validate thruster-specific configuration
             for actuator_name in self.actuators:
                 if isinstance(self.actuators[actuator_name], Thruster):

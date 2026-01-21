@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -39,8 +39,6 @@ the corresponding actuator torques.
 """
 
 from .articulation import Articulation, ArticulationCfg, ArticulationData
-from .articulation import ArticulationWithThrusters, ArticulationWithThrustersCfg, ArticulationDataWithThrusters
-from .articulation import Multirotor, MultirotorCfg, MultirotorData
 from .asset_base import AssetBase
 from .asset_base_cfg import AssetBaseCfg
 from .deformable_object import DeformableObject, DeformableObjectCfg, DeformableObjectData

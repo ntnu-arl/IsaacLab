@@ -115,11 +115,8 @@ integrated with the `NVIDIA Omniverse Platform <https://developer.nvidia.com/omn
 Since all assets are hosted on Nucleus, we do not need to include them in the repository. However,
 we need to include the links to the assets in the documentation.
 
-The included assets are part of the `Isaac Sim Content <https://docs.isaacsim.omniverse.nvidia.com/latest/assets/index.html>`__.
-To use this content, you can use the Asset Browser provided in Isaac Sim.
-
-Please check the `Isaac Sim documentation <https://docs.isaacsim.omniverse.nvidia.com/latest/assets/index.html>`__
-for more information on how to download the assets.
+Please checkout the `Isaac Sim Assets <https://docs.isaacsim.omniverse.nvidia.com/latest/assets/usd_assets_overview.html>`__
+for more information on what is presently available.
 
 .. attention::
 
@@ -518,9 +515,7 @@ Tools
 We use the following tools for maintaining code quality:
 
 * `pre-commit <https://pre-commit.com/>`__: Runs a list of formatters and linters over the codebase.
-* `black <https://black.readthedocs.io/en/stable/>`__: The uncompromising code formatter.
-* `flake8 <https://flake8.pycqa.org/en/latest/>`__: A wrapper around PyFlakes, pycodestyle and
-  McCabe complexity checker.
+* `ruff <https://github.com/astral-sh/ruff/>`__: An extremely fast Python linter and formatter.
 
 Please check `here <https://pre-commit.com/#install>`__ for instructions
 to set these up. To run over the entire repository, please execute the

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -221,10 +221,14 @@ class MeshRepeatedObjectsTerrainCfg(SubTerrainBaseCfg):
     """"This parameter is deprecated, but stated here to support backward compatibility"""
 
     abs_height_noise: tuple[float, float] = (0.0, 0.0)
-    """The minimum and maximum amount of additive noise for the height of the objects. Default is set to 0.0, which is no noise."""
+    """The minimum and maximum amount of additive noise for the height of the objects. Default is set to 0.0,
+    which is no noise.
+    """
 
     rel_height_noise: tuple[float, float] = (1.0, 1.0)
-    """The minimum and maximum amount of multiplicative noise for the height of the objects. Default is set to 1.0, which is no noise."""
+    """The minimum and maximum amount of multiplicative noise for the height of the objects. Default is set to 1.0,
+    which is no noise.
+    """
 
     platform_width: float = 1.0
     """The width of the cylindrical platform at the center of the terrain. Defaults to 1.0."""
@@ -314,88 +318,3 @@ class MeshRepeatedCylindersTerrainCfg(MeshRepeatedObjectsTerrainCfg):
 
     object_params_end: ObjectCfg = MISSING
     """The box curriculum parameters at the end of the curriculum."""
-
-
-@configclass
-class MeshFloatingObstaclesTerrainCfg(SubTerrainBaseCfg):
-    """Configuration for a terrain with floating obstacles."""
-
-    min_num_obstacles: int = 10
-    max_num_obstacles: int = 40
-    object_func = mesh_utils_terrains.make_box
-    function = mesh_terrains.floating_obstacles_terrain
-    env_size: tuple[float, float, float] = MISSING
-    @configclass
-    class BoxCfg():
-        size: tuple[float, float, float] = MISSING
-        center_ratio_min: tuple[float, float, float] = MISSING
-        center_ratio_max: tuple[float, float, float] = MISSING
-
-    panel_obs_cfg = BoxCfg()
-    panel_obs_cfg.size = (0.1, 1.2, 3.0)
-    panel_obs_cfg.center_ratio_min = (0.25, 0.1, 0.1)
-    panel_obs_cfg.center_ratio_max = (0.75, 0.9, 0.9)
-
-    small_wall_obs_cfg  = BoxCfg()
-    small_wall_obs_cfg.size = (0.1, 0.5, 0.5)
-    small_wall_obs_cfg.center_ratio_min = (0.25, 0.1, 0.1)
-    small_wall_obs_cfg.center_ratio_max = (0.75, 0.9, 0.9)
-
-    big_wall_obs_cfg = BoxCfg()
-    big_wall_obs_cfg.size = (0.1, 1.0, 1.0)
-    big_wall_obs_cfg.center_ratio_min = (0.25, 0.1, 0.1)
-    big_wall_obs_cfg.center_ratio_max = (0.75, 0.9, 0.9)
-
-    small_cube_obs_cfg = BoxCfg()
-    small_cube_obs_cfg.size = (0.4, 0.4, 0.4)
-    small_cube_obs_cfg.center_ratio_min = (0.25, 0.1, 0.1)
-    small_cube_obs_cfg.center_ratio_max = (0.75, 0.9, 0.9)
-
-    rod_obs_cfg = BoxCfg()
-    rod_obs_cfg.size = (0.1, 0.1, 2.0)
-    rod_obs_cfg.center_ratio_min = (0.25, 0.1, 0.1)
-    rod_obs_cfg.center_ratio_max = (0.75, 0.9, 0.9)
-
-    left_wall_cfg = BoxCfg()
-    left_wall_cfg.size = (12.0, 0.2, 6.0)
-    left_wall_cfg.center_ratio_min = (0.5, 1.0, 0.5)
-    left_wall_cfg.center_ratio_max = (0.5, 1.0, 0.5)
-
-    right_wall_cfg = BoxCfg()
-    right_wall_cfg.size = (12.0, 0.2, 6.0)
-    right_wall_cfg.center_ratio_min = (0.5, 0.0, 0.5)
-    right_wall_cfg.center_ratio_max = (0.5, 0.0, 0.5)
-
-    back_wall_cfg = BoxCfg()
-    back_wall_cfg.size = (0.2, 8.0, 6.0)
-    back_wall_cfg.center_ratio_min = (0.0, 0.5, 0.5)
-    back_wall_cfg.center_ratio_max = (0.0, 0.5, 0.5)
-
-    front_wall_cfg = BoxCfg()
-    front_wall_cfg.size = (0.2, 8.0, 6.0)
-    front_wall_cfg.center_ratio_min = (1.0, 0.5, 0.5)
-    front_wall_cfg.center_ratio_max = (1.0, 0.5, 0.5)
-
-    top_wall_cfg = BoxCfg()
-    top_wall_cfg.size = (12.0, 8.0, 0.2)
-    top_wall_cfg.center_ratio_min = (0.5, 0.5, 1.0)
-    top_wall_cfg.center_ratio_max = (0.5, 0.5, 1.0)
-
-    bottom_wall_cfg = BoxCfg()
-    bottom_wall_cfg.size = (12.0, 8.0, 0.2)
-    bottom_wall_cfg.center_ratio_min = (0.5, 0.5, 0.0)
-    bottom_wall_cfg.center_ratio_max = (0.5, 0.5, 0.0)
-
-    wall_cfgs = [
-        left_wall_cfg,
-        right_wall_cfg,
-        back_wall_cfg,
-        front_wall_cfg,
-        # top_wall_cfg,
-        bottom_wall_cfg,
-    ]
-
-    obstacle_cfgs = [small_wall_obs_cfg,
-                     big_wall_obs_cfg,
-                     small_cube_obs_cfg,
-                     rod_obs_cfg]
