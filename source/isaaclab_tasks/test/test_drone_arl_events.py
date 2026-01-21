@@ -1,9 +1,15 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # SPDX-License-Identifier: BSD-3-Clause
 
 # pyright: reportPrivateUsage=none
 
 """Integration tests for drone ARL disturbances using real Articulation/WrenchComposer."""
+
 from isaaclab.app import AppLauncher
 
 # launch omniverse app headless
@@ -11,12 +17,14 @@ simulation_app = AppLauncher(headless=True).app
 
 import pytest
 import torch
+from isaaclab_contrib.assets import Multirotor
 
 from isaaclab.managers import EventManager, EventTermCfg, SceneEntityCfg
 from isaaclab.sim import build_simulation_context
-from isaaclab.assets import Articulation
-from isaaclab_assets.robots.arl_robot_1 import ARL_ROBOT_1_CFG
+
 from isaaclab_tasks.manager_based.drone_arl.mdp import events as drone_events
+
+from isaaclab_assets.robots.arl_robot_1 import ARL_ROBOT_1_CFG
 
 
 @pytest.fixture
@@ -34,25 +42,28 @@ def real_env(sim):
     # Create environment prims
     num_envs = 1
     import isaacsim.core.utils.prims as prim_utils
-    
+
     translations = torch.zeros(num_envs, 3, device=sim.device)
     translations[:, 0] = torch.arange(num_envs) * 2.5
-    
+
     # Create Top-level Xforms, one for each articulation
     for i in range(num_envs):
         prim_utils.create_prim(f"/World/Env_{i}", "Xform", translation=translations[i][:3])
-    
+
     # Create Multirotor asset
     multirotor_cfg = ARL_ROBOT_1_CFG.replace(prim_path="/World/Env_.*/Robot")
-    multirotor_cfg.actuators["thrusters"].dt = float(sim.cfg.dt)
+    # Update dt for thrusters if they exist
+    if "thrusters" in multirotor_cfg.actuators:
+        multirotor_cfg.actuators["thrusters"].dt = float(sim.cfg.dt)
     multirotor_cfg.init_state.joint_pos = {}
     multirotor_cfg.init_state.joint_vel = {}
-    multirotor_cfg.actuators = {}
-    articulation = Articulation(multirotor_cfg)
-    
+    # Note: We keep actuators to maintain valid config (rotor_directions validation requires matching thruster count)
+    # Use Multirotor class directly (not Articulation) since it handles ThrusterCfg properly
+    multirotor = Multirotor(multirotor_cfg)
+
     # reset sim and asset
     sim.reset()
-    articulation.reset()
+    multirotor.reset()
 
     class SceneMap:
         def __init__(self, asset):
@@ -62,7 +73,7 @@ def real_env(sim):
             if key == "robot":
                 return self.asset
             raise KeyError(key)
-        
+
         def keys(self):
             return ["robot"]
 
@@ -76,7 +87,7 @@ def real_env(sim):
             self.device = sim.device
             self.episode_length_buf = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
-    return DummyEnv(sim, articulation)
+    return DummyEnv(sim, multirotor)
 
 
 @pytest.mark.isaacsim_ci
@@ -99,9 +110,6 @@ def test_apply_disturbance_impulse(real_env):
     event_man = EventManager(cfg, real_env)
     asset = real_env.scene["robot"]
 
-    # Initial state should have no forces
-    initial_force = asset._instantaneous_wrench_composer.composed_force_as_torch.clone()
-    
     # Let interval elapse to trigger event
     fired = False
     for _ in range(5):  # give a few chances for the interval to trigger
@@ -145,8 +153,6 @@ def test_apply_disturbance_continuous(real_env):
     event_man = EventManager(cfg, real_env)
     asset = real_env.scene["robot"]
 
-    initial_force = asset._permanent_wrench_composer.composed_force_as_torch.clone()
-
     # Let interval elapse to trigger event
     for _ in range(2):
         event_man.apply("interval", dt=real_env.dt)
@@ -157,41 +163,6 @@ def test_apply_disturbance_continuous(real_env):
     # Permanent composer should be active with non-zero forces
     assert asset._permanent_wrench_composer._active or torch.any(
         asset._permanent_wrench_composer.composed_force_as_torch != 0
-    )
-
-
-@pytest.mark.isaacsim_ci
-def test_clear_disturbance(real_env):
-    """Test clearing permanent disturbances."""
-    asset = real_env.scene["robot"]
-    
-    # Apply a permanent wrench
-    env_ids = torch.arange(asset.num_instances, device=asset.device, dtype=torch.int32)
-    body_ids, _ = asset.find_bodies("base_link", preserve_order=True)
-    
-    asset.set_permanent_external_wrench(
-        forces=torch.ones((asset.num_instances, len(body_ids), 3), device=asset.device),
-        torques=torch.ones((asset.num_instances, len(body_ids), 3), device=asset.device),
-        body_ids=body_ids,
-        env_ids=env_ids,
-        is_global=False,
-    )
-    
-    # Verify forces are set
-    assert torch.allclose(
-        asset._permanent_wrench_composer.composed_force_as_torch[:, body_ids, :],
-        torch.ones((asset.num_instances, len(body_ids), 3), device=asset.device),
-        atol=1e-5,
-    )
-
-    # Clear the disturbance
-    drone_events.clear_disturbance(real_env, env_ids, asset_cfg=SceneEntityCfg("robot"))
-
-    # Forces should be cleared
-    assert torch.allclose(
-        asset._permanent_wrench_composer.composed_force_as_torch,
-        torch.zeros((asset.num_instances, asset.num_bodies, 3), device=asset.device),
-        atol=1e-5,
     )
 
 

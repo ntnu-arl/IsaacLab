@@ -11,9 +11,10 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch
+from isaaclab_contrib.assets.multirotor import Multirotor
 
 import isaaclab.utils.math as math_utils
-from isaaclab.assets import Articulation, RigidObjectCollection
+from isaaclab.assets import RigidObjectCollection
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 
 if TYPE_CHECKING:
@@ -207,7 +208,7 @@ def apply_disturbance(
             Defaults to 1.
     """
     # extract the used quantities (to enable type-hinting)
-    asset: Articulation = env.scene[asset_cfg.name]
+    asset: Multirotor = env.scene[asset_cfg.name]
 
     # find body ID
     body_ids, _ = asset.find_bodies(body_name, preserve_order=True)
@@ -226,7 +227,7 @@ def apply_disturbance(
     # choose composer based on duration
     if duration_steps == 1:
         # impulse: use instantaneous (auto-clears after 1 step)
-        asset.add_instantaneous_external_wrench(
+        asset.add_instantaneous_disturbance(
             forces=forces,
             torques=torques,
             body_ids=body_ids,
@@ -235,7 +236,7 @@ def apply_disturbance(
         )
     else:
         # continuous: use permanent (persists until cleared)
-        asset.set_permanent_external_wrench(
+        asset.set_permanent_disturbance(
             forces=forces,
             torques=torques,
             body_ids=body_ids,
@@ -244,46 +245,6 @@ def apply_disturbance(
         )
         # Note: For duration_steps > 1, you'll need a separate clear event
         # or manually clear it after the desired duration
-
-
-def clear_disturbance(
-    env: ManagerBasedRLEnv,
-    env_ids: torch.Tensor,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-):
-    """Clear permanent disturbances from the drone.
-
-    This function clears any permanent external wrenches that were previously applied
-    via :func:`apply_disturbance` with duration_steps > 1.
-
-    Args:
-        env: The environment instance.
-        env_ids: Environment indices to clear the disturbance from.
-        asset_cfg: Configuration for the asset to clear the disturbance from.
-    """
-    # extract the used quantities (to enable type-hinting)
-    asset: Articulation = env.scene[asset_cfg.name]
-
-    # Convert env_ids to int32 if it's a tensor (warp expects int32)
-    if isinstance(env_ids, torch.Tensor):
-        env_ids = env_ids.to(torch.int32)
-
-    # clear permanent wrench by setting zeros with correct shape
-    # Determine the number of environments and bodies
-    num_envs = len(env_ids)
-    body_ids, _ = asset.find_bodies("base_link", preserve_order=True)
-    num_bodies = len(body_ids)
-
-    # Create zero tensors with correct shape: (num_envs, num_bodies, 3)
-    zero_forces = torch.zeros((num_envs, num_bodies, 3), device=asset.device)
-    zero_torques = torch.zeros((num_envs, num_bodies, 3), device=asset.device)
-
-    asset.set_permanent_external_wrench(
-        forces=zero_forces,
-        torques=zero_torques,
-        body_ids=body_ids,
-        env_ids=env_ids,
-    )
 
 
 class apply_continuous_disturbance_with_duration(ManagerTermBase):
@@ -315,7 +276,7 @@ class apply_continuous_disturbance_with_duration(ManagerTermBase):
         self._disturbance_start_time = torch.full((self.num_envs,), -1.0, device=self.device, dtype=torch.float32)
 
         # Store the asset reference
-        self.asset: Articulation = env.scene[self.asset_cfg.name]
+        self.asset: Multirotor = env.scene[self.asset_cfg.name]
         self.body_ids, _ = self.asset.find_bodies(self.body_name, preserve_order=True)
 
     def reset(self, env_ids: Sequence[int] | slice | torch.Tensor | None = None) -> None:
@@ -329,32 +290,37 @@ class apply_continuous_disturbance_with_duration(ManagerTermBase):
         elif not isinstance(env_ids, (slice, torch.Tensor)):
             env_ids = torch.tensor(env_ids, dtype=torch.long, device=self.device)
 
-        # Reset tracking
-        if isinstance(env_ids, slice):
-            self._disturbance_start_time[env_ids] = -1.0
-        else:
-            self._disturbance_start_time[env_ids] = -1.0
+        self._disturbance_start_time[env_ids] = -1.0
 
-        # Clear any active disturbances by setting zeros with correct shape
-        # Determine the number of environments and bodies
-        if isinstance(env_ids, slice):
-            num_envs = self.num_envs
-        elif isinstance(env_ids, torch.Tensor):
-            num_envs = len(env_ids)
-        else:
-            num_envs = len(env_ids)
-        num_bodies = len(self.body_ids)
+        # # Convert env_ids to tensor if it's a slice
+        # if isinstance(env_ids, slice):
+        #     if env_ids == slice(None):
+        #         env_ids_tensor = None  # All environments
+        #     else:
+        #         env_ids_tensor = torch.arange(self.num_envs, device=self.device)[env_ids]
+        # elif isinstance(env_ids, torch.Tensor):
+        #     env_ids_tensor = env_ids
+        # else:
+        #     env_ids_tensor = env_ids
 
-        # Create zero tensors with correct shape: (num_envs, num_bodies, 3)
-        zero_forces = torch.zeros((num_envs, num_bodies, 3), device=self.device)
-        zero_torques = torch.zeros((num_envs, num_bodies, 3), device=self.device)
+        # num_bodies = len(self.body_ids)
+        # if env_ids_tensor is None:
+        #     num_envs = self.num_envs
+        # else:
+        #     num_envs = len(env_ids_tensor)
 
-        self.asset.set_permanent_external_wrench(
-            forces=zero_forces,
-            torques=zero_torques,
-            body_ids=self.body_ids,
-            env_ids=env_ids,
-        )
+        # # Create zero tensors with correct shape: (num_envs, num_bodies, 3)
+        # zero_forces = torch.zeros((num_envs, num_bodies, 3), device=self.device)
+        # zero_torques = torch.zeros((num_envs, num_bodies, 3), device=self.device)
+
+        # # Clear any active disturbances by setting zeros
+        # self.asset.set_permanent_disturbance(
+        #     forces=zero_forces,
+        #     torques=zero_torques,
+        #     body_ids=self.body_ids,
+        #     env_ids=env_ids_tensor,
+        #     is_global=False,
+        # )
 
     def __call__(
         self,
@@ -407,7 +373,7 @@ class apply_continuous_disturbance_with_duration(ManagerTermBase):
             forces = math_utils.sample_uniform(*self.force_range, size, self.device)
             torques = math_utils.sample_uniform(*self.torque_range, size, self.device)
 
-            self.asset.set_permanent_external_wrench(
+            self.asset.set_permanent_disturbance(
                 forces=forces,
                 torques=torques,
                 body_ids=self.body_ids,
@@ -425,7 +391,7 @@ class apply_continuous_disturbance_with_duration(ManagerTermBase):
             zero_forces = torch.zeros((len(clear_env_ids), num_bodies, 3), device=self.device)
             zero_torques = torch.zeros((len(clear_env_ids), num_bodies, 3), device=self.device)
 
-            self.asset.set_permanent_external_wrench(
+            self.asset.set_permanent_disturbance(
                 forces=zero_forces,
                 torques=zero_torques,
                 body_ids=self.body_ids,
