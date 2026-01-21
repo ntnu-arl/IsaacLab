@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -135,6 +135,7 @@ class UR10CubeStackEnvCfg(StackEnvCfg):
 
 @configclass
 class UR10LongSuctionCubeStackEnvCfg(UR10CubeStackEnvCfg):
+    """Configuration for the UR10 Long Suction Cube Stack Environment."""
 
     def __post_init__(self):
         # post init of parent
@@ -152,7 +153,7 @@ class UR10LongSuctionCubeStackEnvCfg(UR10CubeStackEnvCfg):
         # Set surface gripper: Ensure the SurfaceGripper prim has the required attributes
         self.scene.surface_gripper = SurfaceGripperCfg(
             prim_path="{ENV_REGEX_NS}/Robot/ee_link/SurfaceGripper",
-            max_grip_distance=0.05,
+            max_grip_distance=0.0075,
             shear_force_limit=5000.0,
             coaxial_force_limit=5000.0,
             retry_interval=0.05,
@@ -176,7 +177,6 @@ class UR10LongSuctionCubeStackEnvCfg(UR10CubeStackEnvCfg):
 
 @configclass
 class UR10ShortSuctionCubeStackEnvCfg(UR10CubeStackEnvCfg):
-
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -190,7 +190,7 @@ class UR10ShortSuctionCubeStackEnvCfg(UR10CubeStackEnvCfg):
         # Set surface gripper: Ensure the SurfaceGripper prim has the required attributes
         self.scene.surface_gripper = SurfaceGripperCfg(
             prim_path="{ENV_REGEX_NS}/Robot/ee_link/SurfaceGripper",
-            max_grip_distance=0.05,
+            max_grip_distance=0.0075,
             shear_force_limit=5000.0,
             coaxial_force_limit=5000.0,
             retry_interval=0.05,

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -117,8 +117,8 @@ class PinholeCameraCfg(SpawnerCfg):
             0 & 0 & 1
             \\end{bmatrix},
 
-        where :math:`f_x` and :math:`f_y` are the focal length along x and y direction, while :math:`c_x` and :math:`c_y` are the
-        principle point offsets along x and y direction respectively.
+        where :math:`f_x` and :math:`f_y` are the focal length along x and y direction, while :math:`c_x` and
+        :math:`c_y` are the principle point offsets along x and y direction respectively.
 
         Args:
             intrinsic_matrix: Intrinsic matrix of the camera in row-major format.
@@ -166,7 +166,7 @@ class FisheyeCameraCfg(PinholeCameraCfg):
     `camera documentation <https://docs.omniverse.nvidia.com/materials-and-rendering/latest/cameras.html#fisheye-properties>`__.
 
     .. note::
-        The default values are taken from the `Replicator camera <https://docs.omniverse.nvidia.com/py/replicator/1.9.8/source/omni.replicator.core/docs/API.html#omni.replicator.core.create.camera>`__
+        The default values are taken from the `Replicator camera <https://docs.omniverse.nvidia.com/py/replicator/1.12.16/source/extensions/omni.replicator.core/docs/API.html#cameras>`__
         function.
 
     .. _fish-eye camera: https://en.wikipedia.org/wiki/Fisheye_lens

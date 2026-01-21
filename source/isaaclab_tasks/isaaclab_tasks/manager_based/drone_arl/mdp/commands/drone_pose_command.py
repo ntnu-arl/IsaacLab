@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -42,7 +42,7 @@ class DroneUniformPoseCommand(UniformPoseCommand):
         )
         # compute the error
         pos_error, rot_error = compute_pose_error(
-            # Sub-terrain shift for correct position error calculation @grzemal
+            # Sub-terrain shift for correct position error calculation
             self.pose_command_b[:, :3] + self._env.scene.env_origins,
             self.pose_command_w[:, 3:],
             self.robot.data.body_pos_w[:, self.body_idx],
@@ -58,7 +58,7 @@ class DroneUniformPoseCommand(UniformPoseCommand):
             return
         # update the markers
         # -- goal pose
-        # Sub-terrain shift for visualization purposes @grzemal
+        # Sub-terrain shift for visualization purposes
         self.goal_pose_visualizer.visualize(
             self.pose_command_b[:, :3] + self._env.scene.env_origins, self.pose_command_b[:, 3:]
         )

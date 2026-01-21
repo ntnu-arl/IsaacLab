@@ -1,13 +1,14 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
 import tempfile
+
 import torch
+from pink.tasks import DampingTask, FrameTask
 
 import carb
-from pink.tasks import DampingTask, FrameTask
 
 import isaaclab.controllers.utils as ControllerUtils
 import isaaclab.envs.mdp as base_mdp
@@ -39,6 +40,7 @@ from isaaclab_assets.robots.fourier import GR1T2_HIGH_PD_CFG  # isort: skip
 ##
 @configclass
 class ObjectTableSceneCfg(InteractiveSceneCfg):
+    """Configuration for the GR1T2 Pick Place Base Scene."""
 
     # Table
     packing_table = AssetBaseCfg(
@@ -116,7 +118,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    pink_ik_cfg = PinkInverseKinematicsActionCfg(
+    upper_body_ik = PinkInverseKinematicsActionCfg(
         pink_controlled_joint_names=[
             "left_shoulder_pitch_joint",
             "left_shoulder_roll_joint",
@@ -132,49 +134,6 @@ class ActionsCfg:
             "right_wrist_yaw_joint",
             "right_wrist_roll_joint",
             "right_wrist_pitch_joint",
-        ],
-        # Joints to be locked in URDF
-        ik_urdf_fixed_joint_names=[
-            "left_hip_roll_joint",
-            "right_hip_roll_joint",
-            "left_hip_yaw_joint",
-            "right_hip_yaw_joint",
-            "left_hip_pitch_joint",
-            "right_hip_pitch_joint",
-            "left_knee_pitch_joint",
-            "right_knee_pitch_joint",
-            "left_ankle_pitch_joint",
-            "right_ankle_pitch_joint",
-            "left_ankle_roll_joint",
-            "right_ankle_roll_joint",
-            "L_index_proximal_joint",
-            "L_middle_proximal_joint",
-            "L_pinky_proximal_joint",
-            "L_ring_proximal_joint",
-            "L_thumb_proximal_yaw_joint",
-            "R_index_proximal_joint",
-            "R_middle_proximal_joint",
-            "R_pinky_proximal_joint",
-            "R_ring_proximal_joint",
-            "R_thumb_proximal_yaw_joint",
-            "L_index_intermediate_joint",
-            "L_middle_intermediate_joint",
-            "L_pinky_intermediate_joint",
-            "L_ring_intermediate_joint",
-            "L_thumb_proximal_pitch_joint",
-            "R_index_intermediate_joint",
-            "R_middle_intermediate_joint",
-            "R_pinky_intermediate_joint",
-            "R_ring_intermediate_joint",
-            "R_thumb_proximal_pitch_joint",
-            "L_thumb_distal_joint",
-            "R_thumb_distal_joint",
-            "head_roll_joint",
-            "head_pitch_joint",
-            "head_yaw_joint",
-            "waist_yaw_joint",
-            "waist_pitch_joint",
-            "waist_roll_joint",
         ],
         hand_joint_names=[
             "L_index_proximal_joint",
@@ -214,20 +173,21 @@ class ActionsCfg:
             base_link_name="base_link",
             num_hand_joints=22,
             show_ik_warnings=False,
-            fail_on_joint_limit_violation=False,  # Determines whether to pink solver will fail due to a joint limit violation
+            # Determines whether Pink IK solver will fail due to a joint limit violation
+            fail_on_joint_limit_violation=False,
             variable_input_tasks=[
                 FrameTask(
                     "GR1T2_fourier_hand_6dof_left_hand_pitch_link",
                     position_cost=8.0,  # [cost] / [m]
                     orientation_cost=1.0,  # [cost] / [rad]
-                    lm_damping=10,  # dampening for solver for step jumps
+                    lm_damping=12,  # dampening for solver for step jumps
                     gain=0.5,
                 ),
                 FrameTask(
                     "GR1T2_fourier_hand_6dof_right_hand_pitch_link",
                     position_cost=8.0,  # [cost] / [m]
                     orientation_cost=1.0,  # [cost] / [rad]
-                    lm_damping=10,  # dampening for solver for step jumps
+                    lm_damping=12,  # dampening for solver for step jumps
                     gain=0.5,
                 ),
                 DampingTask(
@@ -280,15 +240,21 @@ class ObservationsCfg:
         object_rot = ObsTerm(func=base_mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("object")})
         robot_links_state = ObsTerm(func=mdp.get_all_robot_link_state)
 
-        left_eef_pos = ObsTerm(func=mdp.get_left_eef_pos)
-        left_eef_quat = ObsTerm(func=mdp.get_left_eef_quat)
-        right_eef_pos = ObsTerm(func=mdp.get_right_eef_pos)
-        right_eef_quat = ObsTerm(func=mdp.get_right_eef_quat)
+        left_eef_pos = ObsTerm(func=mdp.get_eef_pos, params={"link_name": "left_hand_roll_link"})
+        left_eef_quat = ObsTerm(func=mdp.get_eef_quat, params={"link_name": "left_hand_roll_link"})
+        right_eef_pos = ObsTerm(func=mdp.get_eef_pos, params={"link_name": "right_hand_roll_link"})
+        right_eef_quat = ObsTerm(func=mdp.get_eef_quat, params={"link_name": "right_hand_roll_link"})
 
-        hand_joint_state = ObsTerm(func=mdp.get_hand_state)
-        head_joint_state = ObsTerm(func=mdp.get_head_state)
+        hand_joint_state = ObsTerm(func=mdp.get_robot_joint_state, params={"joint_names": ["R_.*", "L_.*"]})
+        head_joint_state = ObsTerm(
+            func=mdp.get_robot_joint_state,
+            params={"joint_names": ["head_pitch_joint", "head_roll_joint", "head_yaw_joint"]},
+        )
 
-        object = ObsTerm(func=mdp.object_obs)
+        object = ObsTerm(
+            func=mdp.object_obs,
+            params={"left_eef_link_name": "left_hand_roll_link", "right_eef_link_name": "right_hand_roll_link"},
+        )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -308,7 +274,7 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum, params={"minimum_height": 0.5, "asset_cfg": SceneEntityCfg("object")}
     )
 
-    success = DoneTerm(func=mdp.task_done_pick_place)
+    success = DoneTerm(func=mdp.task_done_pick_place, params={"task_link_name": "right_hand_roll_link"})
 
 
 @configclass
@@ -364,44 +330,46 @@ class PickPlaceGR1T2EnvCfg(ManagerBasedRLEnvCfg):
     # Idle action to hold robot in default pose
     # Action format: [left arm pos (3), left arm quat (4), right arm pos (3), right arm quat (4),
     #                 left hand joint pos (11), right hand joint pos (11)]
-    idle_action = torch.tensor([
-        -0.22878,
-        0.2536,
-        1.0953,
-        0.5,
-        0.5,
-        -0.5,
-        0.5,
-        0.22878,
-        0.2536,
-        1.0953,
-        0.5,
-        0.5,
-        -0.5,
-        0.5,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    ])
+    idle_action = torch.tensor(
+        [
+            -0.22878,
+            0.2536,
+            1.0953,
+            0.5,
+            0.5,
+            -0.5,
+            0.5,
+            0.22878,
+            0.2536,
+            1.0953,
+            0.5,
+            0.5,
+            -0.5,
+            0.5,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+    )
 
     def __post_init__(self):
         """Post initialization."""
@@ -416,13 +384,10 @@ class PickPlaceGR1T2EnvCfg(ManagerBasedRLEnvCfg):
         temp_urdf_output_path, temp_urdf_meshes_output_path = ControllerUtils.convert_usd_to_urdf(
             self.scene.robot.spawn.usd_path, self.temp_urdf_dir, force_conversion=True
         )
-        ControllerUtils.change_revolute_to_fixed(
-            temp_urdf_output_path, self.actions.pink_ik_cfg.ik_urdf_fixed_joint_names
-        )
 
         # Set the URDF and mesh paths for the IK controller
-        self.actions.pink_ik_cfg.controller.urdf_path = temp_urdf_output_path
-        self.actions.pink_ik_cfg.controller.mesh_path = temp_urdf_meshes_output_path
+        self.actions.upper_body_ik.controller.urdf_path = temp_urdf_output_path
+        self.actions.upper_body_ik.controller.mesh_path = temp_urdf_meshes_output_path
 
         self.teleop_devices = DevicesCfg(
             devices={
@@ -433,7 +398,7 @@ class PickPlaceGR1T2EnvCfg(ManagerBasedRLEnvCfg):
                             # number of joints in both hands
                             num_open_xr_hand_joints=2 * self.NUM_OPENXR_HAND_JOINTS,
                             sim_device=self.sim.device,
-                            hand_joint_names=self.actions.pink_ik_cfg.hand_joint_names,
+                            hand_joint_names=self.actions.upper_body_ik.hand_joint_names,
                         ),
                     ],
                     sim_device=self.sim.device,
@@ -445,7 +410,7 @@ class PickPlaceGR1T2EnvCfg(ManagerBasedRLEnvCfg):
                             enable_visualization=True,
                             num_open_xr_hand_joints=2 * 26,
                             sim_device=self.sim.device,
-                            hand_joint_names=self.actions.pink_ik_cfg.hand_joint_names,
+                            hand_joint_names=self.actions.upper_body_ik.hand_joint_names,
                         ),
                     ],
                     sim_device=self.sim.device,

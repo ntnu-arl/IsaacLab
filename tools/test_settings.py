@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -26,6 +26,7 @@ PER_TEST_TIMEOUTS = {
     "test_factory_environments.py": 1000,  # This test runs through Factory environments for 100 steps each
     "test_multi_agent_environments.py": 800,  # This test runs through multi-agent environments for 100 steps each
     "test_generate_dataset.py": 500,  # This test runs annotation for 10 demos and generation until one succeeds
+    "test_pink_ik.py": 1000,  # This test runs through all the pink IK environments through various motions
     "test_environments_training.py": (
         6000
     ),  # This test runs through training for several environments and compares thresholds
@@ -33,6 +34,7 @@ PER_TEST_TIMEOUTS = {
     "test_operational_space.py": 500,
     "test_non_headless_launch.py": 1000,  # This test launches the app in non-headless mode and starts simulation
     "test_rl_games_wrapper.py": 500,
+    "test_skrl_wrapper.py": 500,
 }
 """A dictionary of tests and their timeouts in seconds.
 
