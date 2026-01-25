@@ -17,7 +17,7 @@ import warp as wp
 
 import isaaclab.utils.string as string_utils
 from isaaclab.assets.articulation import Articulation
-from isaaclab.utils.math import quat_apply_inverse, quat_rotate
+from isaaclab.utils.math import normalize, quat_apply, quat_apply_inverse
 
 from isaaclab_contrib.actuators import Thruster
 from isaaclab_contrib.utils.types import MultiRotorActions
@@ -460,9 +460,9 @@ class Multirotor(Articulation):
         # Update to get initial poses
         self.update(dt=0.0)
 
-        # Get base_link pose in world frame
-        base_pos_w = self.data.body_link_pos_w[0, base_link_id, :].clone()
-        base_quat_w = self.data.body_link_quat_w[0, base_link_id, :].clone()
+        # Get base_link pose in world frame (no clone needed for single instance)
+        base_pos_w = self.data.body_link_pos_w[0, base_link_id, :]  # (3,)
+        base_quat_w = self.data.body_link_quat_w[0, base_link_id, :]  # (4,)
 
         # Compute full articulation COM
         com_pos_b = self._compute_articulation_com()
@@ -471,15 +471,18 @@ class Multirotor(Articulation):
         # Initialize allocation matrix
         allocation_matrix = torch.zeros(6, num_thrusters, device=self.device)
 
+        # Pre-allocate thrust direction vector (reused in loop)
+        thrust_dir_local = torch.tensor([0.0, 0.0, 1.0], device=self.device)  # +Z in thruster frame
+
         # For each thruster, find its body and compute contribution
         for i, thruster_name in enumerate(thruster_names):
             # Find the body that contains this thruster
             # Thruster names typically match body names (e.g., "back_left_prop")
-            thruster_body_ids, thruster_body_names = self.find_bodies(thruster_name, preserve_order=True)
+            thruster_body_ids, _ = self.find_bodies(thruster_name, preserve_order=True)
 
             if len(thruster_body_ids) == 0:
                 # Try to find by pattern matching
-                thruster_body_ids, thruster_body_names = self.find_bodies(f".*{thruster_name}.*", preserve_order=True)
+                thruster_body_ids, _ = self.find_bodies(f".*{thruster_name}.*", preserve_order=True)
 
             if len(thruster_body_ids) == 0:
                 raise ValueError(
@@ -490,26 +493,23 @@ class Multirotor(Articulation):
 
             # Get thruster body position and orientation in world frame
             # Use body COM position (not link position) for consistency
-            thruster_com_pos_w = self.data.body_com_pos_w[0, thruster_body_id, :3].clone()
-            thruster_quat_w = self.data.body_link_quat_w[0, thruster_body_id, :].clone()
+            thruster_com_pos_w = self.data.body_com_pos_w[0, thruster_body_id, :3]  # (3,)
+            thruster_quat_w = self.data.body_link_quat_w[0, thruster_body_id, :]  # (4,)
 
             # Transform to body frame (relative to base_link first, then adjust for COM)
             thruster_com_pos_rel_w = thruster_com_pos_w - base_pos_w
             thruster_com_pos_b = quat_apply_inverse(base_quat_w, thruster_com_pos_rel_w)
 
-            # CRITICAL: Position relative to full articulation COM (not base_link origin)
+            # Position relative to full articulation COM (not base_link origin)
             thruster_pos_com_b = thruster_com_pos_b - com_pos_b
-            
-            thruster_pos_base_b = thruster_com_pos_b
 
             # Thrust direction: +Z axis in thruster body frame (upward thrust)
             # Airflow points down, but reaction force (thrust) on system points up
-            thrust_dir_local = torch.tensor([0.0, 0.0, 1.0], device=self.device)  # +Z in thruster frame
-            thrust_dir_w = quat_rotate(thruster_quat_w, thrust_dir_local)
+            thrust_dir_w = quat_apply(thruster_quat_w, thrust_dir_local)
             thrust_dir_b = quat_apply_inverse(base_quat_w, thrust_dir_w)
 
-            # Normalize thrust direction
-            thrust_dir_b = thrust_dir_b / torch.norm(thrust_dir_b)
+            # Normalize thrust direction using IsaacLab utility
+            thrust_dir_b = normalize(thrust_dir_b.unsqueeze(0)).squeeze(0)
 
             # Force contribution (rows 0-2): thrust direction in body frame
             allocation_matrix[0:3, i] = thrust_dir_b
@@ -517,55 +517,21 @@ class Multirotor(Articulation):
             # Torque contribution (rows 3-5): r × F - alpha * cq * F
             # r is position vector from COM to thruster (in body frame)
             r = thruster_pos_com_b  # Position relative to COM
-            
-             # DEBUG: Compute torque with both reference points for comparison
-            torque_from_force_com = torch.linalg.cross(r, thrust_dir_b)
-            torque_from_force_base = torch.linalg.cross(thruster_pos_base_b, thrust_dir_b)
-            
-            # Log both for comparison
-            print(f"Thruster {i} ({thruster_name}) - Torque comparison:")
-            print(f"  Position relative to COM: {thruster_pos_com_b}")
-            print(f"  Position relative to base: {thruster_pos_base_b}")
-            print(f"  Torque from COM ref (r_com × F): {torque_from_force_com}")
-            print(f"  Torque from base ref (r_base × F): {torque_from_force_base}")
 
             # Torque from force: r × F
-            # Use explicit dim argument to avoid deprecation warning
             torque_from_force = torch.linalg.cross(r, thrust_dir_b)
 
             # Rotor drag torque: -alpha * cq * F
             # Negative sign because drag opposes motion
             alpha_i = float(rotor_directions[i])  # 1 for CCW, -1 for CW
             rotor_torque = -alpha_i * cq * thrust_dir_b
-            
-            # DEBUG: Check rotor drag torque sign
-            print(f"Thruster {i} ({thruster_name}) - Rotor drag:")
-            print(f"  rotor_direction (alpha_i): {alpha_i}")
-            print(f"  cq: {cq}")
-            print(f"  rotor_torque (before adding to allocation): {rotor_torque}")
-            print(f"  rotor_torque Tz component: {rotor_torque[2]}")
 
             # Total torque
             allocation_matrix[3:6, i] = torque_from_force + rotor_torque
-            
-            # Debug output for each thruster
-            print(f"Thruster {i} ({thruster_name}):")
-            print(f"  Position in base_link frame: {thruster_com_pos_b}")
-            print(f"  Position relative to COM: {thruster_pos_com_b}")
-            print(f"  Thrust direction in base_link: {thrust_dir_b}")
-            print(f"  Torque from force (r × F): {torque_from_force}")
-            print(f"  Rotor drag torque: {rotor_torque}")
-            print(f"  Total torque: {allocation_matrix[3:6, i]}")
 
         # Convert to list format and set in config
         allocation_matrix_list = allocation_matrix.cpu().numpy().tolist()
         self.cfg.allocation_matrix = allocation_matrix_list
-        
-        print("=" * 80)
-        print("Computed Allocation Matrix:")
-        print(f"Thruster order: {thruster_names}")
-        print(f"Matrix:\n{allocation_matrix.cpu().numpy()}")
-        print("=" * 80)
 
         logger.info(f"Computed allocation matrix from USD file: {num_thrusters} thrusters")
 
@@ -584,22 +550,23 @@ class Multirotor(Articulation):
             raise ValueError("Cannot compute articulation COM: could not find 'base_link' in articulation")
         base_link_id = base_link_ids[0]
 
-        # Get base_link pose in world frame
-        base_pos_w = self.data.body_link_pos_w[0, base_link_id, :].clone()
-        base_quat_w = self.data.body_link_quat_w[0, base_link_id, :].clone()
+        # Get base_link pose in world frame (no clone needed for single instance)
+        base_pos_w = self.data.body_link_pos_w[0, base_link_id, :]  # (3,)
+        base_quat_w = self.data.body_link_quat_w[0, base_link_id, :]  # (4,)
 
-        # Get all body COM positions in world frame
-        body_com_pos_w = self.data.body_com_pos_w[0, :, :3].clone()  # Shape: (num_bodies, 3)
+        # Get all body COM positions in world frame (no clone needed, view is sufficient)
+        body_com_pos_w = self.data.body_com_pos_w[0, :, :3]  # (num_bodies, 3)
 
         # Get all body masses and ensure they're on the correct device
-        body_masses = self.root_physx_view.get_masses()[0, :].clone().to(self.device)  # Shape: (num_bodies,)
+        body_masses = self.root_physx_view.get_masses()[0, :].to(self.device)  # (num_bodies,)
 
         # Compute weighted average COM: COM_total = sum(mass_i * COM_i) / sum(mass_i)
         total_mass = torch.sum(body_masses)
         if total_mass < 1e-6:
             raise ValueError("Cannot compute articulation COM: total mass is too small or zero")
 
-        com_pos_w = torch.sum(body_masses[:, None] * body_com_pos_w, dim=0) / total_mass  # Shape: (3,)
+        # Use einsum for efficient weighted sum: sum(mass_i * COM_i)
+        com_pos_w = torch.einsum("i,ij->j", body_masses, body_com_pos_w) / total_mass  # (3,)
 
         # Transform COM to base_link frame
         com_pos_rel_w = com_pos_w - base_pos_w
@@ -644,29 +611,27 @@ class Multirotor(Articulation):
         - Angular drag: T = -C_lin * w - C_quad * |w| * w (body-frame)
         """
         # Get world-frame velocities for base link (body index 0)
-        v = self.data.body_lin_vel_w[:, 0, :]
-        w_world = self.data.body_ang_vel_w[:, 0, :]
+        v = self.data.body_lin_vel_w[:, 0, :]  # (num_envs, 3)
+        w_world = self.data.body_ang_vel_w[:, 0, :]  # (num_envs, 3)
 
         # Convert angular velocity from world to body frame
-        quat_w = self.data.body_quat_w[:, 0, :]
-        w = quat_apply_inverse(quat_w, w_world)
+        quat_w = self.data.body_quat_w[:, 0, :]  # (num_envs, 4)
+        w = quat_apply_inverse(quat_w, w_world)  # (num_envs, 3)
 
-        # Compute linear drag in world frame
-        lin_drag = -self.cfg.lin_drag_linear_coef * v
-        v_norm = torch.linalg.vector_norm(v, dim=-1, keepdim=True)
-        lin_drag = lin_drag - self.cfg.lin_drag_quadratic_coef * v_norm * v
+        # Compute linear drag in world frame: F = -C_lin * v - C_quad * |v| * v
+        v_norm = torch.linalg.vector_norm(v, dim=-1, keepdim=True)  # (num_envs, 1)
+        lin_drag = -self.cfg.lin_drag_linear_coef * v - self.cfg.lin_drag_quadratic_coef * v_norm * v
 
-        # Compute angular drag in body frame
-        ang_drag = -self.cfg.ang_drag_linear_coef * w
-        w_norm = torch.linalg.vector_norm(w, dim=-1, keepdim=True)
-        ang_drag = ang_drag - self.cfg.ang_drag_quadratic_coef * w_norm * w
+        # Compute angular drag in body frame: T = -C_lin * w - C_quad * |w| * w
+        w_norm = torch.linalg.vector_norm(w, dim=-1, keepdim=True)  # (num_envs, 1)
+        ang_drag = -self.cfg.ang_drag_linear_coef * w - self.cfg.ang_drag_quadratic_coef * w_norm * w
 
-        # Reshape for wrench composer
-        forces = lin_drag.unsqueeze(1)  # (num_envs, 1, 3) - world-frame
-        torques = ang_drag.unsqueeze(1)  # (num_envs, 1, 3) - body-frame
+        # Reshape for wrench composer: (num_envs, 1, 3)
+        forces = lin_drag.unsqueeze(1)  # world-frame
+        torques = ang_drag.unsqueeze(1)  # body-frame
 
-        # Get COM positions for base_link (body index 0)
-        base_com_positions = self.data.body_com_pos_w[:, 0:1, :3].clone()  # (num_envs, 1, 3)
+        # Get COM positions for base_link (body index 0) - no clone needed, view is sufficient
+        base_com_positions = self.data.body_com_pos_w[:, 0:1, :3]  # (num_envs, 1, 3)
         positions_wp = wp.from_torch(base_com_positions, dtype=wp.vec3f)
 
         # Add drag to instantaneous wrench composer (applied at COM)
@@ -701,10 +666,8 @@ class Multirotor(Articulation):
         # Resolve env_ids
         if env_ids is None:
             env_ids_wp = self._ALL_INDICES_WP
-            num_envs = self.num_instances
         else:
             env_ids_wp = wp.from_torch(env_ids.to(torch.int32), dtype=wp.int32)
-            num_envs = len(env_ids)
 
         # Convert body_ids to 1D tensor (not expanded)
         body_ids_tensor = torch.tensor(body_ids, dtype=torch.int32, device=self.device)
@@ -728,11 +691,9 @@ class Multirotor(Articulation):
         # Get COM positions for the specified bodies in world frame
         # body_com_pos_w shape: (num_instances, num_bodies, 3)
         if env_ids is None:
-            body_com_positions = self.data.body_com_pos_w[:, body_ids, :3].clone()  # (num_instances, num_bodies, 3)
+            body_com_positions = self.data.body_com_pos_w[:, body_ids, :3]  # (num_instances, num_bodies, 3)
         else:
-            body_com_positions = self.data.body_com_pos_w[env_ids, :, :3][
-                :, body_ids, :
-            ].clone()  # (num_envs, num_bodies, 3)
+            body_com_positions = self.data.body_com_pos_w[env_ids, :, :3][:, body_ids, :]  # (num_envs, num_bodies, 3)
 
         positions_wp = wp.from_torch(body_com_positions, dtype=wp.vec3f)
 
@@ -811,23 +772,6 @@ class Multirotor(Articulation):
     def _combine_thrusts(self):
         """Combine individual thrusts into a wrench vector."""
         thrusts = self._thrust_target_sim
-        
-        # Debug: Verify thruster order matches allocation matrix
-        if not hasattr(self, '_order_verified'):
-            print("=" * 80)
-            print("Verifying thruster order consistency:")
-            print(f"Allocation matrix computed with order: {self._data.thruster_names}")
-            print(f"Thrust array shape: {thrusts.shape}")
-            print(f"Allocation matrix shape: {self.allocation_matrix.shape}")
-            # Check if order matches by verifying actuator thruster_indices
-            for actuator_name, actuator in self.actuators.items():
-                if hasattr(actuator, 'thruster_indices') and hasattr(actuator, 'thruster_names'):
-                    print(f"Actuator '{actuator_name}':")
-                    print(f"  thruster_indices: {actuator.thruster_indices}")
-                    print(f"  thruster_names: {actuator.thruster_names}")
-            print("=" * 80)
-            self._order_verified = True
-        
         self._internal_wrench_target_sim = (self.allocation_matrix @ thrusts.T).T
         # Apply forces to base link (body index 0) only
         self._internal_force_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, :3]
