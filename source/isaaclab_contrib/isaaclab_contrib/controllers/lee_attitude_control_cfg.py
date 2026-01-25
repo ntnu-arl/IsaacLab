@@ -10,11 +10,11 @@ from .lee_controller_base_cfg import LeeControllerBaseCfg
 
 
 @configclass
-class LeeAccControllerCfg(LeeControllerBaseCfg):
-    """Configuration for a Lee-style geometric quadrotor acceleration controller.
+class LeeAttControllerCfg(LeeControllerBaseCfg):
+    """Configuration for a Lee-style geometric quadrotor attitude controller.
 
     Unless otherwise noted, vectors are ordered as (x, y, z) in the simulation world/body frames.
-    The acceleration controller gains are sampled uniformly per environment between
+    The attitude controller gains are sampled uniformly per environment between
     their corresponding ``*_min`` and ``*_max`` bounds at reset.
     """
 

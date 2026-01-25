@@ -41,11 +41,13 @@ class LeePosController(LeeControllerBase):
 
         # Gain ranges
         self.K_pos_range = torch.tensor(self.cfg.K_pos_range, device=device).repeat(num_envs, 1, 1)
+        self.K_vel_range = torch.tensor(self.cfg.K_vel_range, device=device).repeat(num_envs, 1, 1)
         self.K_rot_range = torch.tensor(self.cfg.K_rot_range, device=device).repeat(num_envs, 1, 1)
         self.K_angvel_range = torch.tensor(self.cfg.K_angvel_range, device=device).repeat(num_envs, 1, 1)
 
         # Current gains
         self.K_pos_current = self.K_pos_range.mean(dim=1)
+        self.K_vel_current = self.K_vel_range.mean(dim=1)
         self.K_rot_current = self.K_rot_range.mean(dim=1)
         self.K_angvel_current = self.K_angvel_range.mean(dim=1)
 
@@ -53,7 +55,7 @@ class LeePosController(LeeControllerBase):
         """Compute wrench command from position setpoint.
 
         Args:
-            command: (num_envs, 3) position command in world frame.
+            command: (num_envs, 4) [x, y, z, yaw] in body frame.
 
         Returns:
             (num_envs, 6) wrench command [fx, fy, fz, tx, ty, tz] in body frame.
@@ -69,8 +71,7 @@ class LeePosController(LeeControllerBase):
         self.wrench_command_b[:, 2] = torch.sum(forces_w * body_z_w, dim=1)
 
         # Get current yaw and compute desired orientation
-        _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
-        desired_quat = compute_desired_orientation(forces_w, yaw, self.rotation_matrix_buffer)
+        desired_quat = compute_desired_orientation(forces_w, command[:, 3], self.rotation_matrix_buffer)
 
         # Zero angular velocity setpoint (hover)
         desired_angvel_b = torch.zeros((self.num_envs, 3), device=self.device)
@@ -91,10 +92,11 @@ class LeePosController(LeeControllerBase):
 
     def _randomize_params(self, env_ids: slice | torch.Tensor):
         """Randomize controller gains for the given environments if enabled."""
-        if not self.cfg.randomize_params:
-            return
         self.K_pos_current[env_ids] = math_utils.sample_uniform(
             self.K_pos_range[env_ids, 0], self.K_pos_range[env_ids, 1], self.K_pos_range[env_ids, 0].shape, self.device
+        )
+        self.K_vel_current[env_ids] = math_utils.sample_uniform(
+            self.K_vel_range[env_ids, 0], self.K_vel_range[env_ids, 1], self.K_vel_range[env_ids, 0].shape, self.device
         )
         self.K_rot_current[env_ids] = math_utils.sample_uniform(
             self.K_rot_range[env_ids, 0], self.K_rot_range[env_ids, 1], self.K_rot_range[env_ids, 0].shape, self.device
@@ -113,7 +115,10 @@ class LeePosController(LeeControllerBase):
             setpoint_position: (num_envs, 3) desired position in world frame.
 
         Returns:
-            (num_envs, 3) desired acceleration in world frame.
+            (num_envs, 3) desired acceleration in body frame.
         """
         position_error = setpoint_position - self.robot.data.root_pos_w
-        return self.K_pos_current * position_error
+        # Compute velocity error for position controller
+        velocity_error = -self.robot.data.root_lin_vel_w
+
+        return self.K_vel_current * velocity_error + self.K_pos_current * position_error

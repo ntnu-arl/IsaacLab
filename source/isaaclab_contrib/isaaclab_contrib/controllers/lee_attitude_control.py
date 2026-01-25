@@ -11,24 +11,24 @@ import torch
 
 import isaaclab.utils.math as math_utils
 
-from .lee_acceleration_control_cfg import LeeAccControllerCfg
+from .lee_attitude_control_cfg import LeeAttControllerCfg
 from .lee_controller_base import LeeControllerBase
-from .lee_controller_utils import compute_body_torque, compute_desired_orientation, yaw_rate_to_body_angvel
+from .lee_controller_utils import compute_body_torque, yaw_rate_to_body_angvel
 
 if TYPE_CHECKING:
     from isaaclab.assets import Multirotor
 
 
-class LeeAccController(LeeControllerBase):
-    """Lee acceleration controller for multirotor tracking acceleration setpoints.
+class LeeAttController(LeeControllerBase):
+    """Lee attitude controller for multirotor tracking attitude setpoints.
 
-    Computes a body-frame wrench command ``[Fx, Fy, Fz, Tx, Ty, Tz]`` from an acceleration setpoint
+    Computes a body-frame wrench command ``[Fx, Fy, Fz, Tx, Ty, Tz]`` from an attitude setpoint
     in the world frame. Gains may be randomized per environment if enabled in the configuration.
     """
 
-    cfg: LeeAccControllerCfg
+    cfg: LeeAttControllerCfg
 
-    def __init__(self, cfg: LeeAccControllerCfg, asset: Multirotor, num_envs: int, device: str):
+    def __init__(self, cfg: LeeAttControllerCfg, asset: Multirotor, num_envs: int, device: str):
         """Initialize controller.
 
         Args:
@@ -48,26 +48,22 @@ class LeeAccController(LeeControllerBase):
         self.K_angvel_current = self.K_angvel_range.mean(dim=1)
 
     def compute(self, command: torch.Tensor) -> torch.Tensor:
-        """Compute wrench command from acceleration setpoint.
+        """Compute wrench command from attitude setpoint.
 
         Args:
-            command: (num_envs, 4) acceleration command command [ax, ay, az, yaw_rate] in body frame.
+            command: (num_envs, 4) attitude command command [thrust, roll, pitch, yaw_rate] in body frame.
 
         Returns:
             (num_envs, 6) wrench command [fx, fy, fz, tx, ty, tz] in body frame.
         """
         self.wrench_command_b.zero_()
 
-        # Use command directly as acceleration setpoint
-        forces_w = (command[:, :3] - self.gravity) * self.mass.view(-1, 1)
-
-        # Project forces to body z-axis for thrust command
-        body_z_w = math_utils.matrix_from_quat(self.robot.data.root_quat_w)[:, :, 2]
-        self.wrench_command_b[:, 2] = torch.sum(forces_w * body_z_w, dim=1)
+        # Use command directly as attitude setpoint
+        self.wrench_command_b[:, 2] = (command[:, 2] + 1.0) * self.mass * torch.norm(self.gravity, dim=1)
 
         # Get current yaw and compute desired orientation
         roll, pitch, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
-        desired_quat = compute_desired_orientation(forces_w, yaw, self.rotation_matrix_buffer)
+        desired_quat = math_utils.quat_from_euler_xyz(command[:, 0], command[:, 1], yaw)
 
         # Compute desired angular velocity in body frame from yaw rate command
         desired_angvel_b = yaw_rate_to_body_angvel(command[:, 3], roll, pitch, self.device)

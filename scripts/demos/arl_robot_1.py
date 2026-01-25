@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-Script to view ARL Robot 1 with rotating camera.
+Script to view ARL Robot 1.
 
 Launch Isaac Sim Simulator first.
 """
@@ -25,15 +25,16 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import torch
-from isaaclab_contrib.assets import Multirotor
-from isaaclab_contrib.controllers.lee_velocity_control import LeeVelController
-from isaaclab_contrib.controllers.lee_velocity_control_cfg import LeeVelControllerCfg
 
 import omni.usd
 from pxr import Gf, UsdLux
 
 import isaaclab.sim as sim_utils
 from isaaclab.sim import SimulationContext
+
+from isaaclab_contrib.assets import Multirotor
+from isaaclab_contrib.controllers.lee_position_control import LeePosController
+from isaaclab_contrib.controllers.lee_position_control_cfg import LeePosControllerCfg
 
 from isaaclab_assets.robots.arl_robot_1 import ARL_ROBOT_1_CFG
 
@@ -66,47 +67,35 @@ def main():
     # Get device
     device = sim_cfg.device
 
-    # Create Lee velocity controller
-    controller_cfg = LeeVelControllerCfg(
+    # Create Lee position controller
+    controller_cfg = LeePosControllerCfg(
+        K_pos_range=((2.5, 2.5, 1.5), (3.5, 3.5, 2.0)),
         K_vel_range=((2.5, 2.5, 1.5), (3.5, 3.5, 2.0)),
         K_rot_range=((1.6, 1.6, 0.25), (1.85, 1.85, 0.4)),
         K_angvel_range=((0.4, 0.4, 0.075), (0.5, 0.5, 0.09)),
         max_inclination_angle_rad=1.0471975511965976,
         max_yaw_rate=1.0471975511965976,
-        randomize_params=False,
     )
-    controller = LeeVelController(controller_cfg, robot, num_envs=1, device=str(device))
+    controller = LeePosController(controller_cfg, robot, num_envs=1, device=str(device))
 
     # Get allocation matrix and compute pseudoinverse
     allocation_matrix = torch.tensor(robot.allocation_matrix, device=device, dtype=torch.float32)
     # allocation_matrix is (6, num_thrusters), we need pseudoinverse for wrench -> thrust
     alloc_pinv = torch.linalg.pinv(allocation_matrix)  # Shape: (num_thrusters, 6)
 
-    # Velocity command: hover in place (zero velocity, zero yaw rate)
-    vel_command = torch.zeros((1, 4), device=device)  # [vx, vy, vz, yaw_rate]
-    vel_command[0, 3] = 10.0
+    # Position command: hover in place (zero position, zero yaw)
+    pos_command = torch.zeros((1, 4), device=device)  # [x, y, z, yaw]
+    pos_command[0, 2] = 1.0  # Hover at 1 meter height
 
     # Simulation loop
-    print("[INFO] Starting camera rotation with Lee velocity controller. Press Ctrl+C to stop.")
+    print("[INFO] Starting demo with Lee Position Controller. Press Ctrl+C to stop.")
 
     while simulation_app.is_running():
-        # In the simulation loop, after computing wrench and before applying:
-        wrench = controller.compute(vel_command)
+        # Compute wrench from velocity controller
+        wrench = controller.compute(pos_command)  # Shape: (1, 6)
 
-        # Print allocation matrix
-
-        # Compute thrusts from wrench
-        thrust_cmd = torch.matmul(wrench, alloc_pinv.T)
-        print(f"Thrust command from wrench: {thrust_cmd[0]}")
-
-        # Check if thrusts are creating the expected differential
-        thrust_diff = thrust_cmd[0, 0] - thrust_cmd[0, 1]  # Should be non-zero for yaw
-        print(f"Thrust difference (for yaw): {thrust_diff}")
-
-        # Check the computed wrench from thrusts
-        computed_wrench = torch.matmul(allocation_matrix, thrust_cmd[0].unsqueeze(1)).squeeze(1)
-        print(f"Computed wrench from thrusts: {computed_wrench}")
-
+        # Allocate wrench to thrusters: thrust = pinv(A) @ wrench
+        thrust_cmd = torch.matmul(wrench, alloc_pinv.T)  # Shape: (1, num_thrusters)
         thrust_cmd = thrust_cmd.clamp(min=0.0)  # Ensure non-negative thrust
 
         # Apply thrust

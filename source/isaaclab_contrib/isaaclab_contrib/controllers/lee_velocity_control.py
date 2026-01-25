@@ -91,8 +91,6 @@ class LeeVelController(LeeControllerBase):
 
     def _randomize_params(self, env_ids: slice | torch.Tensor):
         """Randomize controller gains for the given environments if enabled."""
-        if not self.cfg.randomize_params:
-            return
         self.K_vel_current[env_ids] = math_utils.sample_uniform(
             self.K_vel_range[env_ids, 0], self.K_vel_range[env_ids, 1], self.K_vel_range[env_ids, 0].shape, self.device
         )
@@ -113,7 +111,7 @@ class LeeVelController(LeeControllerBase):
             setpoint_velocity: (num_envs, 3) desired velocity in body frame.
 
         Returns:
-            (num_envs, 3) desired acceleration in world frame.
+            (num_envs, 3) desired acceleration in body frame.
         """
         # Get yaw-only orientation (vehicle frame)
         _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)

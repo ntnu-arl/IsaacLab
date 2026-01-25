@@ -16,8 +16,12 @@ import types
 
 import pytest
 import torch
+
 from isaaclab_contrib.controllers import (
     lee_acceleration_control as acc_mod,
+)
+from isaaclab_contrib.controllers import (
+    lee_attitude_control as att_mod,
 )
 from isaaclab_contrib.controllers import (
     lee_position_control as pos_mod,
@@ -26,6 +30,7 @@ from isaaclab_contrib.controllers import (
     lee_velocity_control as vel_mod,
 )
 from isaaclab_contrib.controllers.lee_acceleration_control_cfg import LeeAccControllerCfg
+from isaaclab_contrib.controllers.lee_attitude_control_cfg import LeeAttControllerCfg
 from isaaclab_contrib.controllers.lee_position_control_cfg import LeePosControllerCfg
 from isaaclab_contrib.controllers.lee_velocity_control_cfg import LeeVelControllerCfg
 
@@ -123,6 +128,7 @@ def _create_pos_cfg() -> LeePosControllerCfg:
     """Create position controller config with required parameters."""
     cfg = LeePosControllerCfg()
     cfg.K_pos_range = ((3.0, 3.0, 2.0), (4.0, 4.0, 2.5))
+    cfg.K_vel_range = ((2.5, 2.5, 1.5), (3.5, 3.5, 2.0))
     cfg.K_rot_range = ((1.6, 1.6, 0.25), (1.85, 1.85, 0.4))
     cfg.K_angvel_range = ((0.4, 0.4, 0.075), (0.5, 0.5, 0.09))
     cfg.max_inclination_angle_rad = 1.0471975511965976
@@ -140,6 +146,15 @@ def _create_acc_cfg() -> LeeAccControllerCfg:
     return cfg
 
 
+def _create_att_cfg() -> LeeAttControllerCfg:
+    """Create attitude controller config with required parameters."""
+    cfg = LeeAttControllerCfg()
+    cfg.K_rot_range = ((1.6, 1.6, 0.25), (1.85, 1.85, 0.4))
+    cfg.K_angvel_range = ((0.4, 0.4, 0.075), (0.5, 0.5, 0.09))
+    cfg.max_yaw_rate = 1.0471975511965976
+    return cfg
+
+
 @pytest.mark.parametrize("device_str", ["cpu", "cuda"])
 @pytest.mark.parametrize("num_envs", [1, 2, 8])
 @pytest.mark.parametrize("num_bodies", [1, 4])
@@ -149,6 +164,7 @@ def _create_acc_cfg() -> LeeAccControllerCfg:
         ("LeeVelController", _create_vel_cfg, vel_mod),
         ("LeePosController", _create_pos_cfg, pos_mod),
         ("LeeAccController", _create_acc_cfg, acc_mod),
+        ("LeeAttController", _create_att_cfg, att_mod),
     ],
 )
 def test_lee_controllers_basic(
@@ -170,13 +186,9 @@ def test_lee_controllers_basic(
     robot = _DummyRobot(num_envs, num_bodies, device)
 
     cfg = cfg_factory()
-    cfg.randomize_params = False
     controller = getattr(mod_name, controller_cls)(cfg, robot, num_envs=num_envs, device=str(device))
 
-    if controller_cls == "LeeVelController":
-        command = torch.zeros((num_envs, 4), device=device)  # vx, vy, vz, yaw_rate
-    else:
-        command = torch.zeros((num_envs, 3), device=device)  # position or acceleration setpoint
+    command = torch.zeros((num_envs, 4), device=device)
 
     wrench = controller.compute(command)
 
@@ -201,7 +213,6 @@ def test_lee_vel_randomize_params_within_bounds(
     robot = _DummyRobot(num_envs, num_bodies, device)
 
     cfg = _create_vel_cfg()
-    cfg.randomize_params = True
     controller = vel_mod.LeeVelController(cfg, robot, num_envs=num_envs, device=str(device))
 
     controller.reset_idx(env_ids=None)
@@ -234,7 +245,6 @@ def test_lee_pos_randomize_params_within_bounds(
     robot = _DummyRobot(num_envs, num_bodies, device)
 
     cfg = _create_pos_cfg()
-    cfg.randomize_params = True
     controller = pos_mod.LeePosController(cfg, robot, num_envs=num_envs, device=str(device))
 
     controller.reset_idx(env_ids=None)
@@ -265,8 +275,50 @@ def test_lee_acc_randomize_params_within_bounds(
     robot = _DummyRobot(num_envs, num_bodies, device)
 
     cfg = _create_acc_cfg()
-    cfg.randomize_params = True
     controller = acc_mod.LeeAccController(cfg, robot, num_envs=num_envs, device=str(device))
+
+    controller.reset_idx(env_ids=None)
+
+    # Check K_rot gains
+    K_rot_min = torch.tensor(cfg.K_rot_range[0], device=device, dtype=torch.float32)
+    K_rot_max = torch.tensor(cfg.K_rot_range[1], device=device, dtype=torch.float32)
+    K_rot_current = controller.K_rot_current.to(device)
+
+    assert K_rot_current.shape == (num_envs, 3), f"Expected shape ({num_envs}, 3), got {K_rot_current.shape}"
+    assert torch.all(K_rot_current >= K_rot_min), f"K_rot below minimum: {K_rot_current.min()} < {K_rot_min.min()}"
+    assert torch.all(K_rot_current <= K_rot_max), f"K_rot above maximum: {K_rot_current.max()} > {K_rot_max.max()}"
+
+    # Check K_angvel gains
+    K_angvel_min = torch.tensor(cfg.K_angvel_range[0], device=device, dtype=torch.float32)
+    K_angvel_max = torch.tensor(cfg.K_angvel_range[1], device=device, dtype=torch.float32)
+    K_angvel_current = controller.K_angvel_current.to(device)
+
+    assert K_angvel_current.shape == (num_envs, 3), f"Expected shape ({num_envs}, 3), got {K_angvel_current.shape}"
+    assert torch.all(K_angvel_current >= K_angvel_min), (
+        f"K_angvel below minimum: {K_angvel_current.min()} < {K_angvel_min.min()}"
+    )
+    assert torch.all(K_angvel_current <= K_angvel_max), (
+        f"K_angvel above maximum: {K_angvel_current.max()} > {K_angvel_max.max()}"
+    )
+
+
+@pytest.mark.parametrize("device_str", ["cpu", "cuda"])
+@pytest.mark.parametrize("num_envs", [1, 2, 8])
+@pytest.mark.parametrize("num_bodies", [1, 4])
+def test_lee_att_randomize_params_within_bounds(
+    monkeypatch: pytest.MonkeyPatch, device_str: str, num_envs: int, num_bodies: int
+):
+    """Randomized gains stay within configured ranges for attitude controller.
+
+    Tests edge cases with single and multiple environments and bodies.
+    """
+    device = _device_param(device_str)
+    _patch_aggregate(monkeypatch, att_mod, num_envs, device)
+    _patch_sim_context(monkeypatch, att_mod)
+    robot = _DummyRobot(num_envs, num_bodies, device)
+
+    cfg = _create_att_cfg()
+    controller = att_mod.LeeAttController(cfg, robot, num_envs=num_envs, device=str(device))
 
     controller.reset_idx(env_ids=None)
 
