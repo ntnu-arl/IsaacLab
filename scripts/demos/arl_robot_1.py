@@ -28,13 +28,11 @@ import torch
 from isaaclab_contrib.assets import Multirotor
 from isaaclab_contrib.controllers.lee_velocity_control import LeeVelController
 from isaaclab_contrib.controllers.lee_velocity_control_cfg import LeeVelControllerCfg
-from isaaclab_contrib.controllers.lee_controller_utils import yaw_rate_to_body_angvel
 
 import omni.usd
 from pxr import Gf, UsdLux
 
 import isaaclab.sim as sim_utils
-import isaaclab.utils.math as math_utils
 from isaaclab.sim import SimulationContext
 
 from isaaclab_assets.robots.arl_robot_1 import ARL_ROBOT_1_CFG
@@ -86,7 +84,7 @@ def main():
 
     # Velocity command: hover in place (zero velocity, zero yaw rate)
     vel_command = torch.zeros((1, 4), device=device)  # [vx, vy, vz, yaw_rate]
-    vel_command[0, 3] = 10.
+    vel_command[0, 3] = 10.0
 
     # Simulation loop
     print("[INFO] Starting camera rotation with Lee velocity controller. Press Ctrl+C to stop.")
