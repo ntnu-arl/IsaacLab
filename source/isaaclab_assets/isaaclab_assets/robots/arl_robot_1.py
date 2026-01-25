@@ -26,7 +26,8 @@ ARL_ROBOT_1_THRUSTER = ThrusterCfg(
     tau_inc_range=(0.05, 0.08),
     tau_dec_range=(0.005, 0.005),
     torque_to_thrust_ratio=0.07,
-    thruster_names_expr=["back_left_prop", "back_right_prop", "front_left_prop", "front_right_prop"],
+    # thruster_names_expr=["back_left_prop", "back_right_prop", "front_left_prop", "front_right_prop"],
+    thruster_names_expr=["front_left_prop", "front_right_prop", "back_right_prop", "back_left_prop"],
 )
 
 ##
@@ -64,15 +65,15 @@ ARL_ROBOT_1_CFG = MultirotorCfg(
     ),
     actuators={"thrusters": ARL_ROBOT_1_THRUSTER},
     rotor_directions=[1, -1, 1, -1],
-    # allocation_matrix=None,
-    allocation_matrix=[
-        [0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 1.0],
-        [-0.13, -0.13, 0.13, 0.13],
-        [-0.13, 0.13, 0.13, -0.13],
-        [-0.07, 0.07, -0.07, 0.07],
-    ],
+    allocation_matrix=None,
+    # allocation_matrix=[
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [1.0, 1.0, 1.0, 1.0],
+    #     [-0.13, -0.13, 0.13, 0.13],
+    #     [-0.13, 0.13, 0.13, -0.13],
+    #     [-0.07, 0.07, -0.07, 0.07],
+    # ],
     # allocation_matrix=[
     #     [0.0, 0.0, 0.0, 0.0],
     #     [0.0, 0.0, 0.0, 0.0],

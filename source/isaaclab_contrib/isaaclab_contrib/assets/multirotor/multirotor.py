@@ -364,7 +364,7 @@ class Multirotor(Articulation):
         all_thruster_names = []
 
         for actuator_name, actuator_cfg in self.cfg.actuators.items():
-            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr)
+            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr, preserve_order=True)
 
             # Create 0-based thruster array indices starting from current count
             start_idx = len(all_thruster_names)
@@ -439,7 +439,9 @@ class Multirotor(Articulation):
             cq = self.cfg.actuators["thrusters"].torque_to_thrust_ratio
 
         # Get thruster names in order
-        thruster_names = self.thruster_names
+        thruster_names_expr = self.cfg.actuators["thrusters"].thruster_names_expr
+        # Find bodies in the exact order specified in config
+        body_indices, thruster_names = self.find_bodies(thruster_names_expr, preserve_order=True)
         num_thrusters = len(thruster_names)
 
         if len(rotor_directions) != num_thrusters:
@@ -497,6 +499,8 @@ class Multirotor(Articulation):
 
             # CRITICAL: Position relative to full articulation COM (not base_link origin)
             thruster_pos_com_b = thruster_com_pos_b - com_pos_b
+            
+            thruster_pos_base_b = thruster_com_pos_b
 
             # Thrust direction: +Z axis in thruster body frame (upward thrust)
             # Airflow points down, but reaction force (thrust) on system points up
@@ -513,6 +517,17 @@ class Multirotor(Articulation):
             # Torque contribution (rows 3-5): r × F - alpha * cq * F
             # r is position vector from COM to thruster (in body frame)
             r = thruster_pos_com_b  # Position relative to COM
+            
+             # DEBUG: Compute torque with both reference points for comparison
+            torque_from_force_com = torch.linalg.cross(r, thrust_dir_b)
+            torque_from_force_base = torch.linalg.cross(thruster_pos_base_b, thrust_dir_b)
+            
+            # Log both for comparison
+            print(f"Thruster {i} ({thruster_name}) - Torque comparison:")
+            print(f"  Position relative to COM: {thruster_pos_com_b}")
+            print(f"  Position relative to base: {thruster_pos_base_b}")
+            print(f"  Torque from COM ref (r_com × F): {torque_from_force_com}")
+            print(f"  Torque from base ref (r_base × F): {torque_from_force_base}")
 
             # Torque from force: r × F
             # Use explicit dim argument to avoid deprecation warning
@@ -522,13 +537,35 @@ class Multirotor(Articulation):
             # Negative sign because drag opposes motion
             alpha_i = float(rotor_directions[i])  # 1 for CCW, -1 for CW
             rotor_torque = -alpha_i * cq * thrust_dir_b
+            
+            # DEBUG: Check rotor drag torque sign
+            print(f"Thruster {i} ({thruster_name}) - Rotor drag:")
+            print(f"  rotor_direction (alpha_i): {alpha_i}")
+            print(f"  cq: {cq}")
+            print(f"  rotor_torque (before adding to allocation): {rotor_torque}")
+            print(f"  rotor_torque Tz component: {rotor_torque[2]}")
 
             # Total torque
             allocation_matrix[3:6, i] = torque_from_force + rotor_torque
+            
+            # Debug output for each thruster
+            print(f"Thruster {i} ({thruster_name}):")
+            print(f"  Position in base_link frame: {thruster_com_pos_b}")
+            print(f"  Position relative to COM: {thruster_pos_com_b}")
+            print(f"  Thrust direction in base_link: {thrust_dir_b}")
+            print(f"  Torque from force (r × F): {torque_from_force}")
+            print(f"  Rotor drag torque: {rotor_torque}")
+            print(f"  Total torque: {allocation_matrix[3:6, i]}")
 
         # Convert to list format and set in config
         allocation_matrix_list = allocation_matrix.cpu().numpy().tolist()
         self.cfg.allocation_matrix = allocation_matrix_list
+        
+        print("=" * 80)
+        print("Computed Allocation Matrix:")
+        print(f"Thruster order: {thruster_names}")
+        print(f"Matrix:\n{allocation_matrix.cpu().numpy()}")
+        print("=" * 80)
 
         logger.info(f"Computed allocation matrix from USD file: {num_thrusters} thrusters")
 
@@ -774,6 +811,23 @@ class Multirotor(Articulation):
     def _combine_thrusts(self):
         """Combine individual thrusts into a wrench vector."""
         thrusts = self._thrust_target_sim
+        
+        # Debug: Verify thruster order matches allocation matrix
+        if not hasattr(self, '_order_verified'):
+            print("=" * 80)
+            print("Verifying thruster order consistency:")
+            print(f"Allocation matrix computed with order: {self._data.thruster_names}")
+            print(f"Thrust array shape: {thrusts.shape}")
+            print(f"Allocation matrix shape: {self.allocation_matrix.shape}")
+            # Check if order matches by verifying actuator thruster_indices
+            for actuator_name, actuator in self.actuators.items():
+                if hasattr(actuator, 'thruster_indices') and hasattr(actuator, 'thruster_names'):
+                    print(f"Actuator '{actuator_name}':")
+                    print(f"  thruster_indices: {actuator.thruster_indices}")
+                    print(f"  thruster_names: {actuator.thruster_names}")
+            print("=" * 80)
+            self._order_verified = True
+        
         self._internal_wrench_target_sim = (self.allocation_matrix @ thrusts.T).T
         # Apply forces to base link (body index 0) only
         self._internal_force_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, :3]
