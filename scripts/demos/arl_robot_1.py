@@ -28,11 +28,13 @@ import torch
 from isaaclab_contrib.assets import Multirotor
 from isaaclab_contrib.controllers.lee_velocity_control import LeeVelController
 from isaaclab_contrib.controllers.lee_velocity_control_cfg import LeeVelControllerCfg
+from isaaclab_contrib.controllers.lee_controller_utils import yaw_rate_to_body_angvel
 
 import omni.usd
 from pxr import Gf, UsdLux
 
 import isaaclab.sim as sim_utils
+import isaaclab.utils.math as math_utils
 from isaaclab.sim import SimulationContext
 
 from isaaclab_assets.robots.arl_robot_1 import ARL_ROBOT_1_CFG
@@ -78,22 +80,35 @@ def main():
     controller = LeeVelController(controller_cfg, robot, num_envs=1, device=str(device))
 
     # Get allocation matrix and compute pseudoinverse
-    allocation_matrix = torch.tensor(robot_cfg.allocation_matrix, device=device, dtype=torch.float32)
+    allocation_matrix = torch.tensor(robot.allocation_matrix, device=device, dtype=torch.float32)
     # allocation_matrix is (6, num_thrusters), we need pseudoinverse for wrench -> thrust
     alloc_pinv = torch.linalg.pinv(allocation_matrix)  # Shape: (num_thrusters, 6)
 
     # Velocity command: hover in place (zero velocity, zero yaw rate)
     vel_command = torch.zeros((1, 4), device=device)  # [vx, vy, vz, yaw_rate]
+    vel_command[0, 3] = 10.
 
     # Simulation loop
     print("[INFO] Starting camera rotation with Lee velocity controller. Press Ctrl+C to stop.")
 
     while simulation_app.is_running():
-        # Compute wrench from velocity controller
-        wrench = controller.compute(vel_command)  # Shape: (1, 6)
+        # In the simulation loop, after computing wrench and before applying:
+        wrench = controller.compute(vel_command)
 
-        # Allocate wrench to thrusters: thrust = pinv(A) @ wrench
-        thrust_cmd = torch.matmul(wrench, alloc_pinv.T)  # Shape: (1, num_thrusters)
+        # Print allocation matrix
+
+        # Compute thrusts from wrench
+        thrust_cmd = torch.matmul(wrench, alloc_pinv.T)
+        print(f"Thrust command from wrench: {thrust_cmd[0]}")
+
+        # Check if thrusts are creating the expected differential
+        thrust_diff = thrust_cmd[0, 0] - thrust_cmd[0, 1]  # Should be non-zero for yaw
+        print(f"Thrust difference (for yaw): {thrust_diff}")
+
+        # Check the computed wrench from thrusts
+        computed_wrench = torch.matmul(allocation_matrix, thrust_cmd[0].unsqueeze(1)).squeeze(1)
+        print(f"Computed wrench from thrusts: {computed_wrench}")
+
         thrust_cmd = thrust_cmd.clamp(min=0.0)  # Ensure non-negative thrust
 
         # Apply thrust
