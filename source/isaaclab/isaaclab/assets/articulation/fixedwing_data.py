@@ -4,17 +4,32 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 
-from isaaclab.assets.articulation.articulation_data import ArticulationData
+import torch
 
 
-class FixedWingData(ArticulationData):
+class FixedWingData:
     """Data container for a multirotor articulation.
 
     This class extends the base articulation data container to include multirotor-specific
     data such as thruster states and forces.
     """
 
-    aero_links: dict[str, int] = None
-    """Dictionary mapping aerodynamic link names to their body indices."""
+    aero_link_mapping: dict[str, int] = {}
+    """Dictionary mapping aerodynamic link names to their indices."""
+
+    aero_actuator_link_mapping: dict[str, int] = {}
+    """Dictionary mapping aerodynamic actuator link names to their indices."""
+
+    engine_link_mapping: dict[str, int] = {}
+    """Dictionary mapping engine link names to their indices."""
+
+    engine_actuator_idx_mapping: dict[str, int] = {}
+    """Dictionary mapping engine actuator names to their indices."""
+
+    aero_stall_hyst: dict[str, torch.Tensor] = {}
+    """Dictionary mapping aerodynamic link names to their stall hysteresis states."""
+
+    wing_drag_tensor: dict[str, torch.Tensor] = {}
+    """Dictionary mapping wing link names to their drag tensors."""
 
     # --- IGNORE ---

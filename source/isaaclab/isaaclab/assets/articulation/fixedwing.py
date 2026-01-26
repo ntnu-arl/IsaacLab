@@ -47,21 +47,14 @@ class FixedWing(Articulation):
         self._device: torch.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )
-        self.aero_link_mapping: dict[str, int] = {}
-        self.aero_actuator_link_mapping: dict[str, int] = {}
-        self.engine_link_mapping: dict[str, int] = {}
-        self.engine_actuator_idx_mapping: dict[str, int] = {}
 
-        self.roll_axis = torch.tensor(
-            [0.0, -1.0, 0.0],
-            device=self._device,
-        )
-        self._ones = None
-        self.wing_drag_tensor: dict[str, torch.Tensor] = {}
-        self.wing_stall_tensor: dict[str, torch.Tensor] = {}
-        self.wing_coeff_tensor: dict[str, torch.Tensor] = {}
-        self.wing_q_coeff_tensor: dict[str, torch.Tensor] = {}
-        self._debug_drawer = None
+    @property
+    def data(self) -> FixedWingData:
+        return self._data
+
+    @property
+    def num_instances(self) -> int:
+        return self.root_physx_view.count
 
     def _process_aero_cfg(self) -> None:
         for link_name, wing_cfg in self.cfg.wings.items():
@@ -70,19 +63,24 @@ class FixedWing(Articulation):
                 raise ValueError(
                     f"Could not find body '{link_name}' for fixed-wing aerodynamics."
                 )
-            self.aero_link_mapping[link_names[0]] = body_idx[0]
-            self.wing_drag_tensor[link_name] = torch.tensor(
+            self._aerodata.aero_link_mapping[link_names[0]] = body_idx[0]
+            self._aerodata.wing_drag_tensor[link_name] = torch.tensor(
                 [wing_cfg.C_rdr, wing_cfg.C_rdp, 0.0], device=self._device
             )
 
             if wing_cfg.has_controlsurface:
                 actuator_name = wing_cfg.connected_actuator
-                actuator_idx = self.data.joint_names.index(actuator_name)
+                actuator_idx = self._data.joint_names.index(actuator_name)
                 if actuator_idx is None:
                     raise ValueError(
                         f"Could not find actuator joint '{actuator_name}' for fixed-wing aerodynamics."
                     )
-                self.aero_actuator_link_mapping[link_name] = actuator_idx
+                self._aerodata.aero_actuator_link_mapping[link_name] = actuator_idx
+
+            if wing_cfg.stallable:
+                self._aerodata.aero_stall_hyst[link_name] = torch.zeros(
+                    self.num_instances, device=self._device
+                )
 
         for link_name, engine_cfg in self.cfg.engines.items():
             body_idx, link_names = self.find_bodies(link_name)
@@ -90,14 +88,14 @@ class FixedWing(Articulation):
                 raise ValueError(
                     f"Could not find body '{link_name}' for fixed-wing engines."
                 )
-            self.engine_link_mapping[link_names[0]] = body_idx[0]
+            self._aerodata.engine_link_mapping[link_names[0]] = body_idx[0]
             actuator_name = engine_cfg.connected_actuator
-            actuator_idx = self.data.joint_names.index(actuator_name)
+            actuator_idx = self._data.joint_names.index(actuator_name)
             if actuator_idx is None:
                 raise ValueError(
                     f"Could not find actuator joint '{actuator_name}' for fixed-wing aerodynamics."
                 )
-            self.engine_actuator_idx_mapping[link_name] = actuator_idx
+            self._aerodata.engine_actuator_idx_mapping[link_name] = actuator_idx
 
     def _initialize_impl(self):
         """Initialize the multirotor implementation."""
@@ -106,26 +104,11 @@ class FixedWing(Articulation):
 
         super()._initialize_impl()
 
-        # Replace data container with MultirotorData
+        # container for data access
+        self._aerodata = FixedWingData()
 
         # Create thruster buffers with correct size (SINGLE PHASE)
         self._process_aero_cfg()
-
-    def set_debug_drawer(self, debug_drawer) -> None:
-        self._debug_drawer = debug_drawer
-
-    def draw_velocity_vectors(self, scale: float = 1.0) -> None:
-        """Draw velocity vectors of root link."""
-        if self._debug_drawer is None:
-            return
-        pos = self.data.body_pos_w[:, 0, :]
-        vel = self.data.body_lin_vel_w[:, 0, :]
-        self._debug_drawer.draw_arrow(
-            origins=pos,
-            vectors=vel * scale,
-            colors=torch.tensor([0.0, 0.4, 1.0], device=self.device),
-            radius=0.05,
-        )
 
     def write_data_to_sim(self):
         # self._apply_drag()
@@ -136,7 +119,7 @@ class FixedWing(Articulation):
     def _apply_aerodynamics(self):
         # Get world-frame velocities for base link (body index 0)
 
-        forces = torch.zeros_like(self.data.body_lin_vel_w)
+        forces = torch.zeros_like(self._data.body_lin_vel_w)
         torques = torch.zeros_like(forces)
         positions = torch.zeros_like(forces)
         ones = torch.ones(forces.shape[0], device=self.device)
@@ -144,23 +127,23 @@ class FixedWing(Articulation):
         unit_z[:, 2] = 1.0
 
         for link_name, wing_cfg in self.cfg.wings.items():
-            body_idx = self.aero_link_mapping[link_name]
-            v_world = self.data.body_lin_vel_w[:, body_idx, :]
-            w_world = self.data.body_ang_vel_w[:, body_idx, :]
-            quat_w = self.data.body_quat_w[:, body_idx, :]
+            body_idx = self._aerodata.aero_link_mapping[link_name]
+            v_world = self._data.body_lin_vel_w[:, body_idx, :]
+            w_world = self._data.body_ang_vel_w[:, body_idx, :]
+            quat_w = self._data.body_quat_w[:, body_idx, :]
 
             if wing_cfg.mixed_airflow:
-                influenced_by_body_idx = self.engine_link_mapping[
+                influenced_by_body_idx = self._aerodata.engine_link_mapping[
                     wing_cfg.influenced_by
                 ]
-                influenced_by_actuator_idx = self.engine_actuator_idx_mapping[
+                influenced_by_actuator_idx = self._aerodata.engine_actuator_idx_mapping[
                     wing_cfg.influenced_by
                 ]
                 v_world += quat_apply(
-                    self.data.body_quat_w[:, influenced_by_body_idx, :],
+                    self._data.body_quat_w[:, influenced_by_body_idx, :],
                     unit_z
                     * (
-                        torch.abs(self.data.joint_vel[:, influenced_by_actuator_idx])
+                        torch.abs(self._data.joint_vel[:, influenced_by_actuator_idx])
                         * wing_cfg.mixed_airflow_coefficient
                     ).unsqueeze(-1),
                 )
@@ -178,8 +161,8 @@ class FixedWing(Articulation):
             aoa = torch.atan2(v[:, 2], v[:, 0])  # angle of attack
 
             if wing_cfg.has_controlsurface:
-                delta_q = self.data.joint_pos[
-                    :, self.aero_actuator_link_mapping[link_name]
+                delta_q = self._data.joint_pos[
+                    :, self._aerodata.aero_actuator_link_mapping[link_name]
                 ]
             else:
                 delta_q = 0.0
@@ -197,16 +180,54 @@ class FixedWing(Articulation):
             drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
 
             if wing_cfg.stallable:
-                blend_factor = (
+                blend_factor_up = (
                     torch.clamp(
-                        (torch.abs(aoa) - wing_cfg.stall_angle) / wing_cfg.stall_range,
-                        0,
-                        1,
+                        (torch.abs(aoa) - wing_cfg.stall_angle_up)
+                        / wing_cfg.stall_range,
+                        0.0,
+                        1.0,
                     )
                     ** 0.5
                 )
+                blend_factor_down = (
+                    torch.clamp(
+                        (torch.abs(aoa) - wing_cfg.stall_angle_down)
+                        / wing_cfg.stall_range,
+                        0.0,
+                        1.0,
+                    )
+                    ** 0.5
+                )
+                blend_factor = (
+                    1 - self._aerodata.aero_stall_hyst[link_name]
+                ) * blend_factor_up + self._aerodata.aero_stall_hyst[
+                    link_name
+                ] * blend_factor_down
+
                 blend_factor = blend_factor**3 * (
                     blend_factor * (blend_factor * 6 - 15) + 10
+                )
+
+                self._aerodata.aero_stall_hyst[link_name] = torch.where(
+                    torch.abs(aoa)
+                    >= wing_cfg.stall_angle_up
+                    * (1 - self._aerodata.aero_stall_hyst[link_name]),
+                    1.0,
+                    0.0,
+                )
+
+                self._aerodata.aero_stall_hyst[link_name] = torch.where(
+                    torch.abs(aoa) * self._aerodata.aero_stall_hyst[link_name]
+                    > wing_cfg.stall_angle_down
+                    * (self._aerodata.aero_stall_hyst[link_name])
+                    + 0.01,
+                    1.0,
+                    0.0,
+                )
+                print(
+                    aoa[0] * 180 / 3.14159,
+                    link_name,
+                    self._aerodata.aero_stall_hyst[link_name][0],
                 )
             else:
                 blend_factor = ones
@@ -248,16 +269,17 @@ class FixedWing(Articulation):
                 / 2
             )
 
-            angl_drag = -torch.mul(w * torch.abs(w), self.wing_drag_tensor[link_name])
+            angl_drag = -torch.mul(
+                w * torch.abs(w), self._aerodata.wing_drag_tensor[link_name]
+            )
 
-            torque = (
-                moment_coeff.unsqueeze(-1)
-                * torch.norm(v_projected**2, dim=-1, keepdim=True)
-                * self.roll_axis
+            torque = moment_coeff.unsqueeze(-1) * torch.norm(
+                v_projected**2, dim=-1, keepdim=True
             )
 
             forces[:, body_idx, :] = drag + lift
-            torques[:, body_idx, :] = torque + angl_drag
+            torques[:, body_idx, :] = angl_drag
+            torques[:, body_idx, 1] = -torque[:, 0]
 
         self._instantaneous_wrench_composer.add_forces_and_torques(
             self._ALL_INDICES_WP,
@@ -278,13 +300,15 @@ class FixedWing(Articulation):
         unit_z[:, 2] = 1.0
 
         for link_name, engine_cfg in self.cfg.engines.items():
-            body_idx = self.engine_link_mapping[link_name]
-            quat_w = self.data.body_quat_w[:, body_idx, :]
-            v_world = self.data.body_lin_vel_w[:, body_idx, :]
+            body_idx = self._aerodata.engine_link_mapping[link_name]
+            quat_w = self._data.body_quat_w[:, body_idx, :]
+            v_world = self._data.body_lin_vel_w[:, body_idx, :]
             v = quat_apply_inverse(quat_w, v_world)
 
             rpm = (
-                self.data.joint_vel[:, self.engine_actuator_idx_mapping[link_name]]
+                self._data.joint_vel[
+                    :, self._aerodata.engine_actuator_idx_mapping[link_name]
+                ]
                 / engine_cfg.max_rpm
             )
 
