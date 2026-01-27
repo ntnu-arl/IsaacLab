@@ -26,9 +26,6 @@ class FixedWingData:
     engine_actuator_idx_mapping: dict[str, int] = {}
     """Dictionary mapping engine actuator names to their indices."""
 
-    aero_stall_hyst: dict[str, torch.Tensor] = {}
-    """Dictionary mapping aerodynamic link names to their stall hysteresis states."""
-
     wing_drag_tensor: dict[str, torch.Tensor] = {}
     """Dictionary mapping wing link names to their drag tensors."""
 

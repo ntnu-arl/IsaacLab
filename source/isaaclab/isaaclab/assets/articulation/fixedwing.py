@@ -43,6 +43,7 @@ class FixedWing(Articulation):
             cfg: A configuration instance.
         """
         super().__init__(cfg)
+        self._dt = 1.0 / 120.0  # default to 60 Hz
 
         self._device: torch.device = torch.device(
             "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -96,6 +97,10 @@ class FixedWing(Articulation):
                     f"Could not find actuator joint '{actuator_name}' for fixed-wing aerodynamics."
                 )
             self._aerodata.engine_actuator_idx_mapping[link_name] = actuator_idx
+
+    def update(self, dt: float):
+        self._dt = dt
+        self._data.update(dt)
 
     def _initialize_impl(self):
         """Initialize the multirotor implementation."""
@@ -180,54 +185,16 @@ class FixedWing(Articulation):
             drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
 
             if wing_cfg.stallable:
-                blend_factor_up = (
-                    torch.clamp(
-                        (torch.abs(aoa) - wing_cfg.stall_angle_up)
-                        / wing_cfg.stall_range,
-                        0.0,
-                        1.0,
-                    )
-                    ** 0.5
-                )
-                blend_factor_down = (
-                    torch.clamp(
-                        (torch.abs(aoa) - wing_cfg.stall_angle_down)
-                        / wing_cfg.stall_range,
-                        0.0,
-                        1.0,
-                    )
-                    ** 0.5
-                )
                 blend_factor = (
-                    1 - self._aerodata.aero_stall_hyst[link_name]
-                ) * blend_factor_up + self._aerodata.aero_stall_hyst[
-                    link_name
-                ] * blend_factor_down
-
+                    torch.clamp(
+                        (torch.abs(aoa) - wing_cfg.stall_angle) / wing_cfg.stall_range,
+                        0,
+                        1,
+                    )
+                    ** 0.3
+                )
                 blend_factor = blend_factor**3 * (
                     blend_factor * (blend_factor * 6 - 15) + 10
-                )
-
-                self._aerodata.aero_stall_hyst[link_name] = torch.where(
-                    torch.abs(aoa)
-                    >= wing_cfg.stall_angle_up
-                    * (1 - self._aerodata.aero_stall_hyst[link_name]),
-                    1.0,
-                    0.0,
-                )
-
-                self._aerodata.aero_stall_hyst[link_name] = torch.where(
-                    torch.abs(aoa) * self._aerodata.aero_stall_hyst[link_name]
-                    > wing_cfg.stall_angle_down
-                    * (self._aerodata.aero_stall_hyst[link_name])
-                    + 0.01,
-                    1.0,
-                    0.0,
-                )
-                print(
-                    aoa[0] * 180 / 3.14159,
-                    link_name,
-                    self._aerodata.aero_stall_hyst[link_name][0],
                 )
             else:
                 blend_factor = ones
@@ -236,12 +203,7 @@ class FixedWing(Articulation):
                 1.9 * aoa
             ) + blend_factor * wing_cfg.C_lt * torch.sin(1.9 * aoa)
 
-            lift_q_blended = (
-                (1 - blend_factor * (1 - wing_cfg.q_reduced_effectiveness))
-                * delta_q
-                * wing_cfg.q_lift
-                * torch.cos(2 * aoa)
-            )
+            lift_q_blended = (1 - blend_factor) * delta_q * wing_cfg.q_lift
 
             lift_coeff = (
                 (lift_blended + lift_q_blended)
@@ -256,7 +218,7 @@ class FixedWing(Articulation):
             )
 
             moment_q_blended = (
-                (1 - blend_factor * (1 - wing_cfg.q_reduced_effectiveness))
+                (1 - blend_factor * 0.8)
                 * delta_q
                 * wing_cfg.q_torque
                 * torch.cos(2 * aoa)
@@ -293,7 +255,7 @@ class FixedWing(Articulation):
     def _apply_thrust(self):
         # Get world-frame velocities for base link (body index 0)
 
-        forces = torch.zeros_like(self.data.body_lin_vel_w)
+        forces = torch.zeros_like(self._data.body_lin_vel_w)
         torques = torch.zeros_like(forces)
         positions = torch.zeros_like(forces)
         unit_z = torch.zeros_like(positions[:, 0, :])

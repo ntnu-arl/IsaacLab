@@ -28,9 +28,8 @@ class FloaterCfg:
         C_lt: float = 1.2,
         C_m: float = 0.06,
         stallable: bool = True,
-        stall_angle: float = 8.0,
-        stall_range: float = 12.0,
-        hyst_range: float = 0.5,
+        stall_angle: float = 12.0,
+        stall_range: float = 8.0,
         width: float = 0.0,
         depth: float = 0.0,
         has_controlsurface: bool = False,
@@ -52,8 +51,7 @@ class FloaterCfg:
         self.C_rdr = 1.17 * ((width * 0.5) ** 3) / 2 * depth
         self.wing_area_projected = width * depth
         self.stallable = stallable
-        self.stall_angle_up = (stall_angle + hyst_range) / 180.0 * 3.141592653589793
-        self.stall_angle_down = (stall_angle - hyst_range) / 180.0 * 3.141592653589793
+        self.stall_angle = stall_angle / 180.0 * 3.141592653589793
         self.stall_range = stall_range / 180.0 * 3.141592653589793
         self.has_controlsurface = has_controlsurface
         self.connected_actuator = connected_actuator
