@@ -208,11 +208,11 @@ The `ThrustAction` term provides flexible preprocessing to support all modes thr
 
 ### Demo Script
 
-A complete demonstration of quadcopter simulation is available:
+A complete demonstration of multirotor simulation is available:
 
 ```bash
-# Run quadcopter demo
-./isaaclab.sh -p scripts/demos/quadcopter.py
+# Run multirotor demo
+./isaaclab.sh -p scripts/demos/arl_robot_1.py
 ```
 
 ## TacSL Tactile Sensor (Detailed)
