@@ -404,6 +404,6 @@ class NavigationAction(ThrustAction):
 
         if env_ids is not None:
             env_ids = slice(None)
-           
-         self._commands[env_ids] = 0.0
-         self._prev_commands[env_ids] = 0.0
+
+        self._commands[env_ids] = 0.0
+        self._prev_commands[env_ids] = 0.0
