@@ -13,10 +13,11 @@ import isaaclab.utils.math as math_utils
 
 from .lee_controller_base import LeeControllerBase
 from .lee_controller_utils import compute_body_torque, compute_desired_orientation
-from .lee_position_control_cfg import LeePosControllerCfg
 
 if TYPE_CHECKING:
     from isaaclab.assets import Multirotor
+
+    from .lee_position_control_cfg import LeePosControllerCfg
 
 
 class LeePosController(LeeControllerBase):

@@ -25,10 +25,6 @@ if TYPE_CHECKING:
 # import logger
 logger = logging.getLogger(__name__)
 
-from isaaclab_contrib.controllers.lee_acceleration_control import LeeAccController
-from isaaclab_contrib.controllers.lee_position_control import LeePosController
-from isaaclab_contrib.controllers.lee_velocity_control import LeeVelController
-
 
 class ThrustAction(ActionTerm):
     """Thrust action term that applies the processed actions as thrust commands.
@@ -322,33 +318,17 @@ class NavigationAction(ThrustAction):
         # Initialize parent class (this handles all the thruster setup)
         super().__init__(cfg, env)
 
-        # Initialize controller based on controller_cfg type
-        from isaaclab_contrib.controllers import LeeAccControllerCfg, LeePosControllerCfg, LeeVelControllerCfg
+        # Initialize controller using class_type from config
+        self._lc = self.cfg.controller_cfg.class_type(
+            cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
+        )
+        # Log warning if not using velocity controller
+        from isaaclab_contrib.controllers import LeeVelControllerCfg
 
-        if isinstance(self.cfg.controller_cfg, LeeVelControllerCfg):
-            self._lc = LeeVelController(
-                cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
-            )
-        elif isinstance(self.cfg.controller_cfg, LeePosControllerCfg):
-            self._lc = LeePosController(
-                cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
-            )
+        if not isinstance(self.cfg.controller_cfg, LeeVelControllerCfg):
             logger.warning(
-                "Navigation task tuned for velocity control."
-                "Consider using velocity controller for better performance or retune reward function"
-            )
-        elif isinstance(self.cfg.controller_cfg, LeeAccControllerCfg):
-            self._lc = LeeAccController(
-                cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
-            )
-            logger.warning(
-                "Navigation task tuned for velocity control."
-                "Consider using velocity controller for better performance or retune reward function"
-            )
-        else:
-            raise ValueError(
-                f"Unsupported controller_cfg type: {type(self.cfg.controller_cfg)}. "
-                f"Supported types are LeeVelControllerCfg, LeePosControllerCfg, LeeAccControllerCfg."
+                "Navigation task tuned for velocity control. "
+                "Consider using velocity controller for better performance or retune reward function."
             )
 
         # Add buffer to store velocity commands for observations)
