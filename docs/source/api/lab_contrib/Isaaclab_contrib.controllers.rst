@@ -7,6 +7,8 @@ isaaclab_contrib.controllers
 
   .. autosummary::
 
+    LeeBaseController
+    LeeBaseControllerCfg
     LeeAccController
     LeeAccControllerCfg
     LeeAttController
