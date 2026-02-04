@@ -14,8 +14,9 @@ import argparse
 
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="View ARL Robot 1 with rotating camera")
-parser.add_argument("--headless", action="store_true", default=False, help="Force display off at all times.")
+parser = argparse.ArgumentParser(description="View ARL Robot 1 with Lee Position Controller.")
+# append AppLauncher cli args
+AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 # launch omniverse app
@@ -43,7 +44,7 @@ def main():
     """Main function to spawn arl_robot_1."""
 
     # Create simulation context
-    sim_cfg = sim_utils.SimulationCfg(dt=0.01, device="cuda:0" if torch.cuda.is_available() else "cpu")
+    sim_cfg = sim_utils.SimulationCfg(dt=0.01)
     sim = SimulationContext(sim_cfg)
 
     # Create a dome light with light blue color
@@ -64,9 +65,6 @@ def main():
     # Play the simulator
     sim.reset()
 
-    # Get device
-    device = sim_cfg.device
-
     # Create Lee position controller
     controller_cfg = LeePosControllerCfg(
         K_pos_range=((2.5, 2.5, 1.5), (3.5, 3.5, 2.0)),
@@ -76,15 +74,15 @@ def main():
         max_inclination_angle_rad=1.0471975511965976,
         max_yaw_rate=1.0471975511965976,
     )
-    controller = LeePosController(controller_cfg, robot, num_envs=1, device=str(device))
+    controller = LeePosController(controller_cfg, robot, num_envs=1, device=str(sim.device))
 
     # Get allocation matrix and compute pseudoinverse
-    allocation_matrix = torch.tensor(robot_cfg.allocation_matrix, device=device, dtype=torch.float32)
+    allocation_matrix = torch.tensor(robot_cfg.allocation_matrix, device=sim.device, dtype=torch.float32)
     # allocation_matrix is (6, num_thrusters), we need pseudoinverse for wrench -> thrust
     alloc_pinv = torch.linalg.pinv(allocation_matrix)  # Shape: (num_thrusters, 6)
 
     # Position command: hover in place (zero position, zero yaw)
-    pos_command = torch.zeros((1, 4), device=device)  # [x, y, z, yaw]
+    pos_command = torch.zeros((1, 4), device=sim.device)  # [x, y, z, yaw]
     pos_command[0, 2] = 1.0  # Hover at 1 meter height
 
     # Simulation loop
