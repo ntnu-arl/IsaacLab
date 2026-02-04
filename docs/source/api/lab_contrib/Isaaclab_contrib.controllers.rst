@@ -31,7 +31,7 @@ Lee Base Controller
   :inherited-members:
   :show-inheritance:
   :exclude-members: __init__, class_type
-  
+
 Lee Acceleration Controller
 ----------------------------
 
