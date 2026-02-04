@@ -42,7 +42,7 @@ from .scenes.obstacle_scenes.obstacle_scene import (
 # Scene definition
 ##
 @configclass
-class MySceneCfg(InteractiveSceneCfg):
+class ArlNavigationSceneCfg(InteractiveSceneCfg):
     """Scene configuration for drone navigation with obstacles."""
 
     # obstacles
@@ -294,7 +294,7 @@ class NavigationVelocityFloatingObstacleEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=20.5)
+    scene: ArlNavigationSceneCfg = ArlNavigationSceneCfg(num_envs=4096, env_spacing=20.5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
