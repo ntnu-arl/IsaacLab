@@ -403,8 +403,7 @@ class NavigationAction(ThrustAction):
         self._lc.reset_idx(env_ids)
 
         if env_ids is not None:
-            self._commands[env_ids] = 0.0
-            self._prev_commands[env_ids] = 0.0
-        else:
-            self._commands[:] = 0.0
-            self._prev_commands[:] = 0.0
+            env_ids = slice(None)
+           
+         self._commands[env_ids] = 0.0
+         self._prev_commands[env_ids] = 0.0

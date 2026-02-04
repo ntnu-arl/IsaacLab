@@ -7,6 +7,8 @@ isaaclab_contrib.controllers
 
   .. autosummary::
 
+    LeeBaseController
+    LeeBaseControllerCfg
     LeeAccController
     LeeAccControllerCfg
     LeeAttController
@@ -16,6 +18,20 @@ isaaclab_contrib.controllers
     LeeVelController
     LeeVelControllerCfg
 
+Lee Base Controller
+--------------------
+
+.. autoclass:: LeeBaseController
+  :members:
+  :inherited-members:
+  :show-inheritance:
+
+.. autoclass:: LeeBaseControllerCfg
+  :members:
+  :inherited-members:
+  :show-inheritance:
+  :exclude-members: __init__, class_type
+  
 Lee Acceleration Controller
 ----------------------------
 
