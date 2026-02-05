@@ -11,12 +11,13 @@ import torch
 
 import isaaclab.utils.math as math_utils
 
-from .lee_attitude_control_cfg import LeeAttControllerCfg
 from .lee_controller_base import LeeControllerBase
 from .lee_controller_utils import compute_body_torque, yaw_rate_to_body_angvel
 
 if TYPE_CHECKING:
     from isaaclab.assets import Multirotor
+
+    from .lee_attitude_control_cfg import LeeAttControllerCfg
 
 
 class LeeAttController(LeeControllerBase):

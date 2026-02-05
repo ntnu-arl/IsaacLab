@@ -42,7 +42,7 @@ from .scenes.obstacle_scenes.obstacle_scene import (
 # Scene definition
 ##
 @configclass
-class MySceneCfg(InteractiveSceneCfg):
+class ArlNavigationSceneCfg(InteractiveSceneCfg):
     """Scene configuration for drone navigation with obstacles."""
 
     # obstacles
@@ -137,7 +137,7 @@ class ActionsCfg:
             max_yaw_rate=1.0471975511965976,
         ),
         max_magnitude=2.0,
-        max_yawrate=3.14 / 3.0,
+        max_yaw_command=3.14 / 3.0,
         max_inclination_angle=3.14 / 4.0,
     )
 
@@ -275,7 +275,7 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     obstacle_levels = CurrTerm(
-        func=mdp.obstacle_density_curriculum,
+        func=mdp.ObstacleDensityCurriculum,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "max_difficulty": 10,
@@ -294,7 +294,7 @@ class NavigationVelocityFloatingObstacleEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=20.5)
+    scene: ArlNavigationSceneCfg = ArlNavigationSceneCfg(num_envs=4096, env_spacing=20.5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

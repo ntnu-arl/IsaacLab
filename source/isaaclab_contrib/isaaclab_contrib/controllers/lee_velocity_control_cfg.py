@@ -8,6 +8,7 @@ from dataclasses import MISSING
 from isaaclab.utils import configclass
 
 from .lee_controller_base_cfg import LeeControllerBaseCfg
+from .lee_velocity_control import LeeVelController
 
 
 @configclass
@@ -18,6 +19,9 @@ class LeeVelControllerCfg(LeeControllerBaseCfg):
     The velocity controller gains are sampled uniformly per environment between
     their corresponding ``*_min`` and ``*_max`` bounds at reset.
     """
+
+    class_type: type = LeeVelController
+    """The class type for the velocity controller."""
 
     K_vel_range: tuple[tuple[float, float, float], tuple[float, float, float]] = MISSING
     """Velocity error proportional gain range about body axes [unitless].

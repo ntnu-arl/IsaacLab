@@ -6,6 +6,7 @@
 
 from isaaclab.utils import configclass
 
+from .lee_acceleration_control import LeeAccController
 from .lee_controller_base_cfg import LeeControllerBaseCfg
 
 
@@ -18,4 +19,5 @@ class LeeAccControllerCfg(LeeControllerBaseCfg):
     their corresponding ``*_min`` and ``*_max`` bounds at reset.
     """
 
-    pass
+    class_type: type = LeeAccController
+    """The class type for the acceleration controller."""

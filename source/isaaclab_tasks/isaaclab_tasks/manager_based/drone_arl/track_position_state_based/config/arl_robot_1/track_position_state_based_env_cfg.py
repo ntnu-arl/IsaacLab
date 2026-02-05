@@ -29,7 +29,7 @@ import isaaclab_tasks.manager_based.drone_arl.mdp as mdp
 # Scene definition
 ##
 @configclass
-class MySceneCfg(InteractiveSceneCfg):
+class ArlTrackPositionStateBasedSceneCfg(InteractiveSceneCfg):
     """Configuration for the terrain scene with a flying robot."""
 
     # robots
@@ -213,7 +213,7 @@ class TrackPositionNoObstaclesEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the state-based drone pose-control environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=2.5)
+    scene: ArlTrackPositionStateBasedSceneCfg = ArlTrackPositionStateBasedSceneCfg(num_envs=4096, env_spacing=2.5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

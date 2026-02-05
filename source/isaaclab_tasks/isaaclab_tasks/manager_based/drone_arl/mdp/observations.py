@@ -128,8 +128,8 @@ class ImageLatentObservation(ManagerTermBase):
             cfg.params["sensor_cfg"].name
         ]
         self.data_type: str = cfg.params["data_type"]
-        self.convert_perspective_to_orthogonal: bool = cfg.params.get("convert_perspective_to_orthogonal", False)
-        self.normalize: bool = cfg.params.get("normalize", True)
+        self.convert_perspective_to_orthogonal: bool = (False,)
+        self.normalize: bool = True
 
     @classmethod
     def _get_model(cls, device):
@@ -155,7 +155,7 @@ class ImageLatentObservation(ManagerTermBase):
             cls._model.eval()
         return cls._model
 
-    def __call__(self, env: ManagerBasedEnv, **kwargs) -> torch.Tensor:
+    def __call__(self, env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg, data_type: str) -> torch.Tensor:
         """Compute VAE latents for the current camera frame.
 
         Extracts images from the camera sensor, applies normalization if configured,
@@ -163,8 +163,11 @@ class ImageLatentObservation(ManagerTermBase):
 
         Args:
             env: The manager-based environment providing scene and device information.
-            **kwargs: Additional keyword arguments passed by the observation manager
-                (ignored, configuration is already set during initialization).
+            sensor_cfg: Scene entity config for the camera sensor (unused, already set in __init__).
+            data_type: Data type to extract from the sensor (unused, already set in __init__).
+            convert_perspective_to_orthogonal: Whether to convert perspective to orthogonal depth
+                (unused, already set in __init__).
+            normalize: Whether to normalize images (unused, already set in __init__).
 
         Returns:
             torch.Tensor: Latent representations from the VAE model.
@@ -179,6 +182,9 @@ class ImageLatentObservation(ManagerTermBase):
             - Images are converted to float16 before passing to the VAE for efficiency.
             - Infinity values in depth images are clamped to 10.0 during normalization.
             - Very small depth values (< 0.02) are set to -1.0 to indicate invalid regions.
+            - The parameters (sensor_cfg, data_type, etc.) are ignored here as they are
+            already stored during initialization. They are included in the signature only
+            to satisfy the observation manager's parameter validation.
         """
         images = self.camera_sensor.data.output[self.data_type]
 

@@ -25,10 +25,6 @@ if TYPE_CHECKING:
 # import logger
 logger = logging.getLogger(__name__)
 
-from isaaclab_contrib.controllers.lee_acceleration_control import LeeAccController
-from isaaclab_contrib.controllers.lee_position_control import LeePosController
-from isaaclab_contrib.controllers.lee_velocity_control import LeeVelController
-
 
 class ThrustAction(ActionTerm):
     """Thrust action term that applies the processed actions as thrust commands.
@@ -284,14 +280,16 @@ class NavigationAction(ThrustAction):
             Always 0.0 (constrained to camera FOV)
         - Vertical position/velocity/acceleration:
             [0, max_magnitude] via (action[0] + 1) * sin(pitch) * max_magnitude / 2
-        - Yaw rate: [-max_yawrate, max_yawrate] via action[2] * max_yawrate
+        - Yaw command: [-max_yaw_command, max_yaw_command] via action[2] * max_yaw_command (yaw command is yawrate
+          [rad/s] for velocity and acceleration control and relative yaw change [rad] for position control)
 
         Where:
         - pitch angle is computed as: action[1] * max_inclination_angle
 
     Parameters (from cfg):
         max_magnitude: Maximum translational magnitude for position/velocity/acceleration commands.
-        max_yawrate: Maximum yaw rate in rad/s.
+        max_yaw_command: Maximum yaw command in rad/s for velocity and acceleration
+                         control and relative yaw change [rad] for position control.
         max_inclination_angle: Maximum pitch angle in rad.
 
     Notes:
@@ -306,7 +304,7 @@ class NavigationAction(ThrustAction):
             controller_cfg=LeeVelControllerCfg(...),
             asset_name="robot",
             max_magnitude=2.0,
-            max_yawrate=1.047,  # pi/3
+            max_yaw_command=1.047,
             max_inclination_angle=0.785,  # pi/4
         )
         nav_action = NavigationAction(cfg, env)
@@ -320,25 +318,17 @@ class NavigationAction(ThrustAction):
         # Initialize parent class (this handles all the thruster setup)
         super().__init__(cfg, env)
 
-        # Initialize controller based on controller_cfg type
-        from isaaclab_contrib.controllers import LeeAccControllerCfg, LeePosControllerCfg, LeeVelControllerCfg
+        # Initialize controller using class_type from config
+        self._lc = self.cfg.controller_cfg.class_type(
+            cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
+        )
+        # Log warning if not using velocity controller
+        from isaaclab_contrib.controllers import LeeVelControllerCfg
 
-        if isinstance(self.cfg.controller_cfg, LeeVelControllerCfg):
-            self._lc = LeeVelController(
-                cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
-            )
-        elif isinstance(self.cfg.controller_cfg, LeePosControllerCfg):
-            self._lc = LeePosController(
-                cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
-            )
-        elif isinstance(self.cfg.controller_cfg, LeeAccControllerCfg):
-            self._lc = LeeAccController(
-                cfg=self.cfg.controller_cfg, asset=self._asset, num_envs=self.num_envs, device=self.device
-            )
-        else:
-            raise ValueError(
-                f"Unsupported controller_cfg type: {type(self.cfg.controller_cfg)}. "
-                f"Supported types are LeeVelControllerCfg, LeePosControllerCfg, LeeAccControllerCfg."
+        if not isinstance(self.cfg.controller_cfg, LeeVelControllerCfg):
+            logger.warning(
+                "Navigation task tuned for velocity control. "
+                "Consider using velocity controller for better performance or retune reward function."
             )
 
         # Add buffer to store velocity commands for observations)
@@ -389,7 +379,7 @@ class NavigationAction(ThrustAction):
             * self.cfg.max_magnitude
             / 2.0
         )
-        processed_actions[:, 3] = clamped_action[:, 2] * self.cfg.max_yawrate
+        processed_actions[:, 3] = clamped_action[:, 2] * self.cfg.max_yaw_command
 
         # Store velocity commands for observations
         if not self._has_actions_updated:
@@ -413,8 +403,7 @@ class NavigationAction(ThrustAction):
         self._lc.reset_idx(env_ids)
 
         if env_ids is not None:
-            self._commands[env_ids] = 0.0
-            self._prev_commands[env_ids] = 0.0
-        else:
-            self._commands[:] = 0.0
-            self._prev_commands[:] = 0.0
+            env_ids = slice(None)
+
+        self._commands[env_ids] = 0.0
+        self._prev_commands[env_ids] = 0.0

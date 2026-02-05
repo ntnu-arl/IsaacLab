@@ -15,6 +15,8 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import RigidObjectCollection
 from isaaclab.managers import SceneEntityCfg
 
+from .curriculums import get_obstacle_curriculum_term
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -73,9 +75,16 @@ def reset_obstacles_with_individual_ranges(
     object_names = obstacles.object_names
 
     # Get difficulty levels per environment
-    if use_curriculum and hasattr(env, "_obstacle_difficulty_levels"):
-        difficulty_levels = env._obstacle_difficulty_levels[env_ids]
-        max_difficulty = env._max_obstacle_difficulty
+    if use_curriculum:
+        curriculum_term = get_obstacle_curriculum_term(env)
+        if curriculum_term is not None:
+            # Get difficulty levels for the specific environments being reset
+            difficulty_levels = curriculum_term.difficulty_levels[env_ids]
+            max_difficulty = curriculum_term.max_difficulty
+        else:
+            # Fallback: use max obstacles if curriculum not found
+            difficulty_levels = torch.ones(num_envs, device=env.device) * max_num_obstacles
+            max_difficulty = max_num_obstacles
     else:
         difficulty_levels = torch.ones(num_envs, device=env.device) * max_num_obstacles
         max_difficulty = max_num_obstacles

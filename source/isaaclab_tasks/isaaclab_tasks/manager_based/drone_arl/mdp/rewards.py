@@ -10,12 +10,14 @@ from typing import TYPE_CHECKING
 import torch
 
 import isaaclab.utils.math as math_utils
+from isaaclab.assets import RigidObject
+from isaaclab.managers import SceneEntityCfg
+
+# Import the curriculum class
+from .curriculums import get_obstacle_curriculum_term
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
-
-from isaaclab.assets import RigidObject
-from isaaclab.managers import SceneEntityCfg
 
 """
 Drone control rewards.
@@ -87,7 +89,7 @@ def distance_to_goal_exp_curriculum(
         current curriculum difficulty level.
 
     Note:
-        If no curriculum is active (i.e., `env._obstacle_difficulty_levels` doesn't exist),
+        If no curriculum is active (i.e., ObstacleDensityCurriculum is not found),
         the function behaves identically to :func:`distance_to_goal_exp` with weight=1.0.
     """
     # extract the used quantities (to enable type-hinting)
@@ -98,11 +100,14 @@ def distance_to_goal_exp_curriculum(
 
     # compute the error
     position_error_square = torch.sum(torch.square(command[:, :3] - current_position), dim=1)
-    # weight based on the current curriculum level
-    if hasattr(env, "_obstacle_difficulty_levels"):
-        weight = 1.0 + env._obstacle_difficulty_levels.float() / float(env._max_obstacle_difficulty)
+
+    # Get curriculum term and compute weight
+    curriculum_term = get_obstacle_curriculum_term(env)
+    if curriculum_term is not None:
+        weight = 1.0 + curriculum_term.difficulty_levels.float() / float(curriculum_term.max_difficulty)
     else:
         weight = 1.0
+
     return weight * torch.exp(-position_error_square / std**2)
 
 
@@ -165,7 +170,7 @@ def velocity_to_goal_reward_curriculum(
         (moving away), or zero (perpendicular motion), scaled by the curriculum weight.
 
     Note:
-        If no curriculum is active (i.e., `env._obstacle_difficulty_levels` doesn't exist),
+        If no curriculum is active (i.e., ObstacleDensityCurriculum is not found),
         the function uses weight=1.0 without curriculum scaling.
     """
     # extract the used quantities (to enable type-hinting)
@@ -178,11 +183,14 @@ def velocity_to_goal_reward_curriculum(
     direction_to_goal = direction_to_goal / (torch.norm(direction_to_goal, dim=1, keepdim=True) + 1e-8)
     # compute the reward as the dot product between the velocity and the direction to the goal
     velocity_towards_goal = torch.sum(asset.data.root_lin_vel_w * direction_to_goal, dim=1)
-    # Use obstacle curriculum if it exists
-    if hasattr(env, "_obstacle_difficulty_levels"):
-        weight = 1.0 + env._obstacle_difficulty_levels.float() / float(env._max_obstacle_difficulty)
+
+    # Get curriculum term and compute weight
+    curriculum_term = get_obstacle_curriculum_term(env)
+    if curriculum_term is not None:
+        weight = 1.0 + curriculum_term.difficulty_levels.float() / float(curriculum_term.max_difficulty)
     else:
         weight = 1.0
+
     return weight * velocity_towards_goal
 
 

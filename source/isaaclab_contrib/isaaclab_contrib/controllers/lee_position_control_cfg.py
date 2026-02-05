@@ -8,6 +8,7 @@ from dataclasses import MISSING
 from isaaclab.utils import configclass
 
 from .lee_controller_base_cfg import LeeControllerBaseCfg
+from .lee_position_control import LeePosController
 
 
 @configclass
@@ -18,6 +19,9 @@ class LeePosControllerCfg(LeeControllerBaseCfg):
     The position controller gains are sampled uniformly per environment between
     their corresponding ``*_min`` and ``*_max`` bounds at reset.
     """
+
+    class_type: type = LeePosController
+    """The class type for the position controller."""
 
     K_pos_range: tuple[tuple[float, float, float], tuple[float, float, float]] = MISSING
     """Position error proportional gain range about body axes [unitless].

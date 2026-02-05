@@ -14,10 +14,10 @@ import torch
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 
-from .lee_controller_base_cfg import LeeControllerBaseCfg
-
 if TYPE_CHECKING:
     from isaaclab.assets import Multirotor
+
+    from .lee_controller_base_cfg import LeeControllerBaseCfg
 
 
 class LeeControllerBase:
