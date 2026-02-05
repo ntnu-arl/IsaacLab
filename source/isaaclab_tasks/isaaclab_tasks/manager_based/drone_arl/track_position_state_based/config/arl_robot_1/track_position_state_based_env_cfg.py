@@ -117,7 +117,6 @@ class EventCfg:
     """Configuration for events."""
 
     # reset
-
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
@@ -141,31 +140,15 @@ class EventCfg:
         },
     )
 
-    # Impulse disturbances (auto-clears after 1 step)
-    impulse_disturbance = EventTerm(
-        func=mdp.apply_disturbance,
+    # External force/torque disturbance
+    external_disturbance = EventTerm(
+        func=mdp.apply_external_force_torque,
         mode="interval",
-        interval_range_s=(0.5, 1.5),  # When to trigger (applies once)
+        interval_range_s=(0.5, 1.5),
         params={
-            "asset_cfg": SceneEntityCfg("robot"),
+            "asset_cfg": SceneEntityCfg("robot", body_ids=[0]),
             "force_range": (-2.0, 2.0),
             "torque_range": (-0.3, 0.3),
-            "body_name": "base_link",
-            "duration_steps": 1,  # Auto-clears after 1 step
-        },
-    )
-
-    # Continuous disturbance (applied once, clears after duration)
-    continuous_disturbance = EventTerm(
-        func=mdp.apply_continuous_disturbance_with_duration,
-        mode="interval",
-        interval_range_s=(2.0, 4.0),  # When to trigger (applies once)
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "force_range": (-1.0, 1.0),
-            "torque_range": (-0.2, 0.2),
-            "body_name": "base_link",
-            "duration_s": 1.0,  # Auto-clears after 1 second
         },
     )
 

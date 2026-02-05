@@ -746,8 +746,8 @@ class Multirotor(Articulation):
         """Apply aerodynamic drag forces and torques to the base link at center of mass.
 
         The drag model follows:
-        - Linear drag: F = -C_lin * v - C_quad * |v| * v (world-frame)
-        - Angular drag: T = -C_lin * w - C_quad * |w| * w (body-frame)
+        - Linear drag: F = -C_lin * v - C_quad * |v| * v
+        - Angular drag: T = -C_lin * w - C_quad * |w| * w
         """
         # Get world-frame velocities for base link (body index 0)
         v = self.data.body_lin_vel_w[:, 0, :]  # (num_envs, 3)
@@ -765,11 +765,14 @@ class Multirotor(Articulation):
         w_norm = torch.linalg.vector_norm(w, dim=-1, keepdim=True)  # (num_envs, 1)
         ang_drag = -self.cfg.ang_drag_linear_coef * w - self.cfg.ang_drag_quadratic_coef * w_norm * w
 
+        # Transform angular drag from body frame to world frame
+        ang_drag_w = quat_apply(quat_w, ang_drag)  # (num_envs, 3)
+
         # Reshape for wrench composer: (num_envs, 1, 3)
         forces = lin_drag.unsqueeze(1)  # world-frame
-        torques = ang_drag.unsqueeze(1)  # body-frame
+        torques = ang_drag_w.unsqueeze(1)  # world-frame
 
-        # Get COM positions for base_link (body index 0) - no clone needed, view is sufficient
+        # Get COM positions for base_link (body index 0)
         base_com_positions = self.data.body_com_pos_w[:, 0:1, :3]  # (num_envs, 1, 3)
         positions_wp = wp.from_torch(base_com_positions, dtype=wp.vec3f)
 
@@ -780,132 +783,7 @@ class Multirotor(Articulation):
             forces=wp.from_torch(forces, dtype=wp.vec3f),
             torques=wp.from_torch(torques, dtype=wp.vec3f),
             positions=positions_wp,
-            is_global=True,  # Forces are in world frame
-        )
-
-    def _prepare_wrench_arrays(
-        self,
-        forces: torch.Tensor,
-        torques: torch.Tensor,
-        body_ids: Sequence[int],
-        env_ids: torch.Tensor | None = None,
-    ) -> tuple[wp.array, wp.array, wp.array, wp.array, wp.array]:
-        """Prepare Warp arrays for wrench application at center of mass.
-
-        Args:
-            forces: External forces. Shape is (len(env_ids), len(body_ids), 3) or (len(env_ids), 3).
-            torques: External torques. Shape is (len(env_ids), len(body_ids), 3) or (len(env_ids), 3).
-            body_ids: Body indices to apply wrench to (list of ints).
-            env_ids: Environment indices to apply wrench to. Defaults to None (all environments).
-
-        Returns:
-            Tuple of (env_ids_wp, body_ids_wp, forces_wp, torques_wp, positions_wp) as Warp arrays.
-            positions_wp contains the COM positions of the bodies in world frame.
-        """
-        # Resolve env_ids
-        if env_ids is None:
-            env_ids_wp = self._ALL_INDICES_WP
-        else:
-            env_ids_wp = wp.from_torch(env_ids.to(torch.int32), dtype=wp.int32)
-
-        # Convert body_ids to 1D tensor (not expanded)
-        body_ids_tensor = torch.tensor(body_ids, dtype=torch.int32, device=self.device)
-        num_bodies = len(body_ids)
-        body_ids_wp = wp.from_torch(body_ids_tensor, dtype=wp.int32)  # 1D array
-
-        # Expand forces and torques to (num_envs, num_bodies, 3) if needed
-        if forces.dim() == 2:  # (num_envs, 3)
-            forces = forces.unsqueeze(1).expand(-1, num_bodies, -1)
-        elif forces.shape[1] == 1:  # (num_envs, 1, 3)
-            forces = forces.expand(-1, num_bodies, -1)
-
-        if torques.dim() == 2:  # (num_envs, 3)
-            torques = torques.unsqueeze(1).expand(-1, num_bodies, -1)
-        elif torques.shape[1] == 1:  # (num_envs, 1, 3)
-            torques = torques.expand(-1, num_bodies, -1)
-
-        forces_wp = wp.from_torch(forces, dtype=wp.vec3f)
-        torques_wp = wp.from_torch(torques, dtype=wp.vec3f)
-
-        # Get COM positions for the specified bodies in world frame
-        # body_com_pos_w shape: (num_instances, num_bodies, 3)
-        if env_ids is None:
-            body_com_positions = self.data.body_com_pos_w[:, body_ids, :3]  # (num_instances, num_bodies, 3)
-        else:
-            body_com_positions = self.data.body_com_pos_w[env_ids, :, :3][:, body_ids, :]  # (num_envs, num_bodies, 3)
-
-        positions_wp = wp.from_torch(body_com_positions, dtype=wp.vec3f)
-
-        return env_ids_wp, body_ids_wp, forces_wp, torques_wp, positions_wp
-
-    def add_instantaneous_disturbance(
-        self,
-        forces: torch.Tensor,
-        torques: torch.Tensor,
-        body_ids: Sequence[int],
-        env_ids: torch.Tensor | None = None,
-        is_global: bool = False,
-    ):
-        """Add instantaneous external disturbance (impulse) to the multirotor at center of mass.
-
-        This convenience method handles Warp array conversion internally. The wrench
-        is applied for one simulation step and then automatically cleared.
-        Forces are applied at the center of mass of each body.
-
-        Args:
-            forces: External forces. Shape is (len(env_ids), len(body_ids), 3) or (len(env_ids), 3).
-            torques: External torques. Shape is (len(env_ids), len(body_ids), 3) or (len(env_ids), 3).
-            body_ids: Body indices to apply wrench to (list of ints).
-            env_ids: Environment indices to apply wrench to. Defaults to None (all environments).
-            is_global: Whether forces/torques are in global frame. Defaults to False (body frame).
-        """
-        env_ids_wp, body_ids_wp, forces_wp, torques_wp, positions_wp = self._prepare_wrench_arrays(
-            forces, torques, body_ids, env_ids
-        )
-
-        # Add to instantaneous wrench composer (forces applied at COM positions)
-        self.instantaneous_wrench_composer.add_forces_and_torques(
-            env_ids=env_ids_wp,
-            body_ids=body_ids_wp,
-            forces=forces_wp,
-            torques=torques_wp,
-            positions=positions_wp,
-            is_global=is_global,
-        )
-
-    def set_permanent_disturbance(
-        self,
-        forces: torch.Tensor,
-        torques: torch.Tensor,
-        body_ids: Sequence[int],
-        env_ids: torch.Tensor | None = None,
-        is_global: bool = False,
-    ):
-        """Set permanent external disturbance (continuous) on the multirotor at center of mass.
-
-        This convenience method handles Warp array conversion internally. The wrench
-        persists until explicitly cleared via the permanent_wrench_composer.reset() method.
-        Forces are applied at the center of mass of each body.
-
-        Args:
-            forces: External forces. Shape is (len(env_ids), len(body_ids), 3) or (len(env_ids), 3).
-            torques: External torques. Shape is (len(env_ids), len(body_ids), 3) or (len(env_ids), 3).
-            body_ids: Body indices to apply wrench to (list of ints).
-            env_ids: Environment indices to apply wrench to. Defaults to None (all environments).
-            is_global: Whether forces/torques are in global frame. Defaults to False (body frame).
-        """
-        env_ids_wp, body_ids_wp, forces_wp, torques_wp, positions_wp = self._prepare_wrench_arrays(
-            forces, torques, body_ids, env_ids
-        )
-
-        # Set to permanent wrench composer (forces applied at COM positions)
-        self.permanent_wrench_composer.set_forces_and_torques(
-            env_ids=env_ids_wp,
-            body_ids=body_ids_wp,
-            forces=forces_wp,
-            torques=torques_wp,
-            positions=positions_wp,
-            is_global=is_global,
+            is_global=True,
         )
 
     def _combine_thrusts(self):
