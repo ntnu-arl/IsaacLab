@@ -78,11 +78,6 @@ class FixedWing(Articulation):
                     )
                 self._aerodata.aero_actuator_link_mapping[link_name] = actuator_idx
 
-            if wing_cfg.stallable:
-                self._aerodata.aero_stall_hyst[link_name] = torch.zeros(
-                    self.num_instances, device=self._device
-                )
-
         for link_name, engine_cfg in self.cfg.engines.items():
             body_idx, link_names = self.find_bodies(link_name)
             if len(body_idx) == 0:
