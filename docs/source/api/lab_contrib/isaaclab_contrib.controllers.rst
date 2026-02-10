@@ -7,8 +7,8 @@ isaaclab_contrib.controllers
 
   .. autosummary::
 
-    LeeBaseController
-    LeeBaseControllerCfg
+    LeeControllerBase
+    LeeControllerBaseCfg
     LeeAccController
     LeeAccControllerCfg
     LeeAttController
@@ -21,12 +21,12 @@ isaaclab_contrib.controllers
 Lee Base Controller
 --------------------
 
-.. autoclass:: LeeBaseController
+.. autoclass:: LeeControllerBase
   :members:
   :inherited-members:
   :show-inheritance:
 
-.. autoclass:: LeeBaseControllerCfg
+.. autoclass:: LeeControllerBaseCfg
   :members:
   :inherited-members:
   :show-inheritance:
