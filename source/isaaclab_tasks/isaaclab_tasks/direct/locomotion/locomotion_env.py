@@ -193,12 +193,11 @@ def compute_rewards(
     alive_reward_scale: float,
     motor_effort_ratio: torch.Tensor,
 ):
-    heading_weight_tensor = torch.ones_like(heading_proj) * heading_weight
-    heading_reward = torch.where(heading_proj > 0.8, heading_weight_tensor, heading_weight * heading_proj / 0.8)
+    # reward for moving in the right direction (heading towards target)
+    heading_reward = torch.where(heading_proj > 0.8, heading_weight, heading_weight * heading_proj / 0.8)
 
-    # aligning up axis of robot and environment
-    up_reward = torch.zeros_like(heading_reward)
-    up_reward = torch.where(up_proj > 0.93, up_reward + up_weight, up_reward)
+    # aligning up axis of robot and environment (upright posture)
+    up_reward = torch.where(up_proj > 0.93, up_weight, 0.0)
 
     # energy penalty for movement
     actions_cost = torch.sum(actions**2, dim=-1)
