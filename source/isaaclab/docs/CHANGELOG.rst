@@ -1,6 +1,17 @@
 Changelog
 ---------
 
+
+3.2.0 (2026-02-06)
+~~~~~~~~~~~~~~~~~~
+
+Changed
+^^^^^^^
+
+* Refactored :class:`~isaaclab.sim.SimulationContext` to use :class:`~isaaclab.physics.PhysicsManager`
+  abstraction layer for cleaner separation between simulation orchestration and physics backend.
+
+
 3.1.0 (2026-02-05)
 ~~~~~~~~~~~~~~~~~~
 

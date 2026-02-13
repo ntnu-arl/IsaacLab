@@ -23,7 +23,6 @@ import pytest
 import torch
 
 import omni.replicator.core as rep
-from isaacsim.core.prims import SingleGeometryPrim, SingleRigidPrim
 from pxr import Gf, UsdGeom
 
 import isaaclab.sim as sim_utils
@@ -60,8 +59,7 @@ def setup_camera(device) -> tuple[sim_utils.SimulationContext, TiledCameraCfg, f
     yield sim, camera_cfg, dt
     # Teardown
     rep.vp_manager.destroy_hydra_textures("Replicator")
-    sim._timeline.stop()
-    sim.clear_all_callbacks()
+    sim.stop()
     sim.clear_instance()
 
 
@@ -73,7 +71,7 @@ def test_single_camera_init(setup_camera, device):
     # Create camera
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -252,7 +250,7 @@ def test_multi_camera_init(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -309,7 +307,7 @@ def test_rgb_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -411,7 +409,7 @@ def test_depth_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -465,7 +463,7 @@ def test_rgba_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -519,7 +517,7 @@ def test_albedo_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -577,7 +575,7 @@ def test_simple_shading_only_camera(setup_camera, device, data_type):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -631,7 +629,7 @@ def test_distance_to_camera_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -685,7 +683,7 @@ def test_distance_to_image_plane_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -739,7 +737,7 @@ def test_normals_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -796,7 +794,7 @@ def test_motion_vectors_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -850,7 +848,7 @@ def test_semantic_segmentation_colorize_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -905,7 +903,7 @@ def test_instance_segmentation_fast_colorize_only_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -960,7 +958,7 @@ def test_instance_id_segmentation_fast_colorize_only_camera(setup_camera, device
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1016,7 +1014,7 @@ def test_semantic_segmentation_non_colorize_only_camera(setup_camera, device):
     camera_cfg.colorize_semantic_segmentation = False
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1073,7 +1071,7 @@ def test_instance_segmentation_fast_non_colorize_only_camera(setup_camera, devic
     camera_cfg.colorize_instance_segmentation = False
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1128,7 +1126,7 @@ def test_instance_id_segmentation_fast_non_colorize_only_camera(setup_camera, de
     camera_cfg.colorize_instance_id_segmentation = False
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1197,7 +1195,7 @@ def test_all_annotators_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1302,7 +1300,7 @@ def test_all_annotators_low_resolution_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1405,7 +1403,7 @@ def test_all_annotators_non_perfect_square_number_camera(setup_camera, device):
     camera_cfg.prim_path = "/World/Origin_.*/CameraSensor"
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1528,7 +1526,7 @@ def test_all_annotators_instanceable(setup_camera, device):
     camera_cfg.offset.pos = (0.0, 0.0, 5.5)
     camera = TiledCamera(camera_cfg)
     # Check simulation parameter is set correctly
-    assert sim.has_rtx_sensors()
+    assert sim.get_setting("/isaaclab/render/rtx_sensors")
     # Play sim
     sim.reset()
     # Check if camera is initialized
@@ -1882,6 +1880,8 @@ def _populate_scene():
         color = Gf.Vec3f(random.random(), random.random(), random.random())
         geom_prim.CreateDisplayColorAttr()
         geom_prim.GetDisplayColorAttr().Set([color])
-        # add rigid properties
-        SingleGeometryPrim(f"/World/Objects/Obj_{i:02d}", collision=True)
-        SingleRigidPrim(f"/World/Objects/Obj_{i:02d}", mass=5.0)
+        # add rigid body and collision properties using Isaac Lab schemas
+        prim_path = f"/World/Objects/Obj_{i:02d}"
+        sim_utils.define_rigid_body_properties(prim_path, sim_utils.RigidBodyPropertiesCfg())
+        sim_utils.define_mass_properties(prim_path, sim_utils.MassPropertiesCfg(mass=5.0))
+        sim_utils.define_collision_properties(prim_path, sim_utils.CollisionPropertiesCfg())
