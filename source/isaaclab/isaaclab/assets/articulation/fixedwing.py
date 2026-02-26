@@ -213,10 +213,7 @@ class FixedWing(Articulation):
             )
 
             moment_q_blended = (
-                (1 - blend_factor * 0.8)
-                * delta_q
-                * wing_cfg.q_torque
-                * torch.cos(2 * aoa)
+                (1 - blend_factor) * delta_q * wing_cfg.q_torque * torch.cos(2 * aoa)
             )
 
             moment_coeff = (
