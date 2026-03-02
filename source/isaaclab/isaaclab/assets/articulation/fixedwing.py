@@ -158,7 +158,9 @@ class FixedWing(Articulation):
             v_projected_flipped[:, 0] = -v_projected[:, 2]
             v_projected_flipped[:, 2] = v_projected[:, 0]
 
-            aoa = torch.atan2(v[:, 2], v[:, 0])  # angle of attack
+            aoa = (
+                torch.atan2(v[:, 2], v[:, 0]) - wing_cfg.offset_angle
+            )  # angle of attack
 
             if wing_cfg.has_controlsurface:
                 delta_q = self._data.joint_pos[
@@ -212,12 +214,11 @@ class FixedWing(Articulation):
                 * torch.abs(v_projected_flipped)
             )
 
-            moment_q_blended = (
-                (1 - blend_factor) * delta_q * wing_cfg.q_torque * torch.cos(2 * aoa)
-            )
+            moment_q_blended = (1 - blend_factor) * delta_q * wing_cfg.q_torque
+            moment_blended = (1 - blend_factor) * wing_cfg.C_m * torch.sin(2 * aoa)
 
             moment_coeff = (
-                (wing_cfg.C_m * torch.sin(2 * aoa) + moment_q_blended)
+                (moment_blended + moment_q_blended)
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
