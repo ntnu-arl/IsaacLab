@@ -13,6 +13,7 @@ from isaaclab.markers.config import (
     FRAME_MARKER_CFG,
     GREEN_ARROW_X_MARKER_CFG,
     POSITION_GOAL_MARKER_CFG,
+    RED_ARROW_X_MARKER_CFG,
 )
 from isaaclab.utils import configclass
 
@@ -24,7 +25,7 @@ from .velocity_command import (
     UniformVelocityCommand,
     UniformAirspeedHeadingCommand,
 )
-from .position_command import UniformWaypointCommand
+from .position_command import UniformTrajectoryCommand, UniformWaypointCommand
 
 
 @configclass
@@ -361,4 +362,48 @@ class UniformWaypointCommandCfg(CommandTermCfg):
 
     # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
     current_pos_visualizer_cfg.markers["arrow"].scale = (0.1, 0.1, 0.4)
+    goal_pos_visualizer_cfg.markers["target_far"].radius = 0.3
+
+
+@configclass
+class UniformTrajectoryCommandCfg(CommandTermCfg):
+    """Configuration for the uniform velocity command generator."""
+
+    class_type: type = UniformTrajectoryCommand
+
+    asset_name: str = MISSING
+    """Name of the asset in the environment for which the commands are generated."""
+
+    init_altitude: float = 0.0
+    """Initial altitude for the trajectory command."""
+
+    @configclass
+    class Ranges:
+        """Uniform distribution ranges for the velocity commands."""
+
+        speed: tuple[float, float] = MISSING
+        """Range for the speed command (in m/s)."""
+
+        heading: tuple[float, float] = MISSING
+        """Range for the heading command (in rad)."""
+
+        v_speed: tuple[float, float] = MISSING
+        """Range for the vertical speed command (in m/s)."""
+
+        turn_rate: tuple[float, float] = MISSING
+        """Range for the turn rate command (in rad/s)."""
+
+    ranges: Ranges = MISSING
+    """Distribution ranges for the trajectory commands."""
+
+    goal_pos_visualizer_cfg: VisualizationMarkersCfg = POSITION_GOAL_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/position_goal"
+    )
+
+    """The configuration for the current speed visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
+    goal_dir_visualizer_cfg: VisualizationMarkersCfg = RED_ARROW_X_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/position_goal"
+    )
+    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
+    goal_dir_visualizer_cfg.markers["arrow"].scale = (0.05, 0.05, 0.2)
     goal_pos_visualizer_cfg.markers["target_far"].radius = 0.3

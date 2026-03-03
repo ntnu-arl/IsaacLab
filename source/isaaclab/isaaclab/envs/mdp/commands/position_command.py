@@ -22,7 +22,7 @@ from isaaclab.utils.math import (
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
-    from .commands_cfg import UniformWaypointCommandCfg
+    from .commands_cfg import UniformWaypointCommandCfg, UniformTrajectoryCommandCfg
 
 
 class UniformWaypointCommand(CommandTerm):
@@ -162,3 +162,163 @@ class UniformWaypointCommand(CommandTerm):
         self.current_pos_visualizer.visualize(
             self.robot.data.root_com_pos_w, arrow_quat
         )
+
+
+class UniformTrajectoryCommand(CommandTerm):
+    """Command generator for generating pose commands uniformly.
+
+    The command generator generates poses by sampling positions uniformly within specified
+    regions in cartesian space. For orientation, it samples uniformly the euler angles
+    (roll-pitch-yaw) and converts them into quaternion representation (w, x, y, z).
+
+    The position and orientation commands are generated in the base frame of the robot, and not the
+    simulation world frame. This means that users need to handle the transformation from the
+    base frame to the simulation world frame themselves.
+
+    .. caution::
+
+        Sampling orientations uniformly is not strictly the same as sampling euler angles uniformly.
+        This is because rotations are defined by 3D non-Euclidean space, and the mapping
+        from euler angles to rotations is not one-to-one.
+
+    """
+
+    cfg: UniformTrajectoryCommandCfg
+    """Configuration for the command generator."""
+
+    def __init__(self, cfg: UniformTrajectoryCommandCfg, env: ManagerBasedEnv):
+        """Initialize the command generator class.
+
+        Args:
+            cfg: The configuration parameters for the command generator.
+            env: The environment object.
+        """
+        # initialize the base class
+        super().__init__(cfg, env)
+
+        # extract the robot and body index for which the command is generated
+        self.robot: Articulation = env.scene[cfg.asset_name]
+
+        # create buffers
+        # -- commands: (x, y, altitude) in root frame
+        self.trajectory_setpoint = torch.zeros(self.num_envs, 3, device=self.device)
+        self._trajectory_state = torch.zeros(self.num_envs, 4, device=self.device)
+        self._reset_state = torch.zeros(self.num_envs, 1, device=self.device)
+
+        # -- metrics
+        self.metrics["position_error"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["altitude_error"] = torch.zeros(self.num_envs, device=self.device)
+
+    def __str__(self) -> str:
+        msg = "UniformTrajectoryCommand:\n"
+        msg += f"\tCommand dimension: {tuple(self.command.shape[1:])}\n"
+        msg += f"\tResampling time range: {self.cfg.resampling_time_range}\n"
+        return msg
+
+    """
+    Properties
+    """
+
+    @property
+    def command(self) -> torch.Tensor:
+        """The desired pose command. Shape is (num_envs, 7).
+
+        The first three elements correspond to the position, followed by the quaternion orientation in (w, x, y, z).
+        """
+        return self.trajectory_setpoint
+
+    """
+    Implementation specific functions.
+    """
+
+    def _update_metrics(self):
+        # transform command from base frame to simulation world frame
+        root_link_pos = self.robot.data.root_com_pos_w
+        pos_error_z = root_link_pos[:, 2] - self.trajectory_setpoint[:, 2]
+        pos_error_xy = torch.norm(
+            root_link_pos[:, :2] - self.trajectory_setpoint[:, :2], dim=-1
+        )
+
+        self.metrics["position_error"] = torch.abs(pos_error_xy)
+        self.metrics["altitude_error"] = torch.abs(pos_error_z)
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        # sample new pose targets
+        # -- position
+        r = torch.empty(len(env_ids), device=self.device)
+        self._trajectory_state[env_ids, 0] = r.uniform_(*self.cfg.ranges.speed)
+        self._trajectory_state[env_ids, 1] = r.uniform_(*self.cfg.ranges.v_speed)
+        self._trajectory_state[env_ids, 2] = r.uniform_(*self.cfg.ranges.heading)
+        self._trajectory_state[env_ids, 3] = r.uniform_(*self.cfg.ranges.turn_rate)
+        self.trajectory_setpoint[env_ids, :] = self._env.scene.env_origins[env_ids, :]
+        self.trajectory_setpoint[env_ids, 2] = self.cfg.init_altitude
+
+    def _update_command(self):
+        self.trajectory_setpoint[:, 0] += (
+            self._trajectory_state[:, 0]
+            * torch.cos(self._trajectory_state[:, 2])
+            * self._env.physics_dt
+            * self._env.cfg.sim.render_interval
+        )
+        self.trajectory_setpoint[:, 1] += (
+            self._trajectory_state[:, 0]
+            * torch.sin(self._trajectory_state[:, 2])
+            * self._env.physics_dt
+            * self._env.cfg.sim.render_interval
+        )
+        self.trajectory_setpoint[:, 2] += (
+            self._trajectory_state[:, 1]
+            * self._env.physics_dt
+            * self._env.cfg.sim.render_interval
+        )
+
+        self._trajectory_state[:, 2] += (
+            self._trajectory_state[:, 3]
+            * self._env.physics_dt
+            * self._env.cfg.sim.render_interval
+        )
+
+    def _set_debug_vis_impl(self, debug_vis: bool):
+        # create markers if necessary for the first time
+        if debug_vis:
+            if not hasattr(self, "goal_pos_visualizer"):
+                # -- goal pose
+                self.goal_pos_visualizer = VisualizationMarkers(
+                    self.cfg.goal_pos_visualizer_cfg
+                )
+            if not hasattr(self, "goal_dir_visualizer"):
+                # -- goal direction
+                self.goal_dir_visualizer = VisualizationMarkers(
+                    self.cfg.goal_dir_visualizer_cfg
+                )
+            self.goal_pos_visualizer.set_visibility(True)
+            self.goal_dir_visualizer.set_visibility(True)
+        else:
+            if hasattr(self, "goal_pos_visualizer"):
+                self.goal_pos_visualizer.set_visibility(False)
+            if hasattr(self, "goal_dir_visualizer"):
+                self.goal_dir_visualizer.set_visibility(False)
+
+    def _debug_vis_callback(self, event):
+        # check if robot is initialized
+        # note: this is needed in-case the robot is de-initialized. we can't access the data
+        if not self.robot.is_initialized:
+            return
+        # update the markers
+
+        # -- goal pose
+
+        self.goal_pos_visualizer.visualize(
+            self.trajectory_setpoint,
+            None,
+        )
+        # -- goal direction
+        target_vector = (
+            self.robot.data.root_com_pos_w[:, :2] - self.trajectory_setpoint[:, :2]
+        )
+        target_angle = wrap_to_pi(
+            torch.atan2(target_vector[:, 1], target_vector[:, 0]) + torch.pi
+        )
+        zeros = torch.zeros_like(target_angle)
+        arrow_quat = quat_from_euler_xyz(zeros, zeros, target_angle)
+        self.goal_dir_visualizer.visualize(self.robot.data.root_com_pos_w, arrow_quat)
