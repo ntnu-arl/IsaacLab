@@ -250,7 +250,9 @@ class UniformTrajectoryCommand(CommandTerm):
         self._trajectory_state[env_ids, 1] = r.uniform_(*self.cfg.ranges.v_speed)
         self._trajectory_state[env_ids, 2] = r.uniform_(*self.cfg.ranges.heading)
         self._trajectory_state[env_ids, 3] = r.uniform_(*self.cfg.ranges.turn_rate)
-        self.trajectory_setpoint[env_ids, :] = self._env.scene.env_origins[env_ids, :]
+        self.trajectory_setpoint[env_ids, :] = self._env.scene.env_origins[
+            env_ids, :
+        ] + torch.tensor([1.0, 0.0, 0.0], device=self.device)
         self.trajectory_setpoint[env_ids, 2] = self.cfg.init_altitude
 
     def _update_command(self):

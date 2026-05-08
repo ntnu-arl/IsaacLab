@@ -169,18 +169,6 @@ class FixedWing(Articulation):
             else:
                 delta_q = 0.0
 
-            drag_coeff = (
-                (
-                    wing_cfg.C_ds
-                    + wing_cfg.C_d * torch.sin(aoa) ** 2
-                    + (delta_q * wing_cfg.q_drag) * torch.cos(aoa) ** 2
-                )
-                * self.cfg.rho
-                * wing_cfg.wing_area_projected
-                / 2
-            )
-            drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
-
             if wing_cfg.stallable:
                 blend_factor = (
                     torch.clamp(
@@ -196,17 +184,14 @@ class FixedWing(Articulation):
             else:
                 blend_factor = ones
 
-            lift_blended = (1 - blend_factor) * wing_cfg.C_ll * torch.sin(
-                1.9 * aoa
-            ) + blend_factor * wing_cfg.C_lt * torch.sin(1.9 * aoa)
-
-            lift_q_blended = (1 - blend_factor) * delta_q * wing_cfg.q_lift
+            lift_blended = (
+                (1 - blend_factor) * (wing_cfg.C_ll) * torch.sin(1.9 * aoa)
+                + blend_factor * wing_cfg.C_lt * torch.sin(1.9 * aoa)
+                + wing_cfg.C_lq * delta_q
+            )
 
             lift_coeff = (
-                (lift_blended + lift_q_blended)
-                * self.cfg.rho
-                * wing_cfg.wing_area_projected
-                / 2
+                (lift_blended) * self.cfg.rho * wing_cfg.wing_area_projected / 2
             )
             lift = (
                 lift_coeff.unsqueeze(-1)
@@ -214,14 +199,25 @@ class FixedWing(Articulation):
                 * torch.abs(v_projected_flipped)
             )
 
-            moment_q_blended = (1 - blend_factor) * delta_q * wing_cfg.q_torque
-            moment_blended = (1 - blend_factor) * wing_cfg.C_m * torch.sin(2 * aoa)
+            dCd = 0.05 * (
+                2 * lift_coeff * wing_cfg.C_lq * delta_q
+                + (wing_cfg.C_lq * delta_q) ** 2
+            )
 
-            moment_coeff = (
-                (moment_blended + moment_q_blended)
+            drag_coeff = (
+                (wing_cfg.C_ds + wing_cfg.C_d * torch.sin(aoa) ** 2 + dCd)
                 * self.cfg.rho
                 * wing_cfg.wing_area_projected
                 / 2
+            )
+            drag = drag_coeff.unsqueeze(-1) * v_projected * torch.abs(v_projected)
+
+            moment_blended = (
+                (1 - blend_factor) * wing_cfg.C_m * torch.sin(2 * aoa)
+            ) + delta_q * wing_cfg.C_mq
+
+            moment_coeff = (
+                (moment_blended) * self.cfg.rho * wing_cfg.wing_area_projected / 2
             )
 
             angl_drag = -torch.mul(

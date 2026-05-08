@@ -28,7 +28,7 @@ from pxr import Gf, Sdf, UsdGeom, Vt
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 from isaaclab.actuators import ImplicitActuator
-from isaaclab.assets import Articulation, DeformableObject, RigidObject
+from isaaclab.assets import Articulation, DeformableObject, FixedWing, RigidObject
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.terrains import TerrainImporter
 from isaaclab.utils.version import compare_versions
@@ -102,9 +102,13 @@ def randomize_rigid_body_scale(
     if isinstance(scale_range, dict):
         range_list = [scale_range.get(key, (1.0, 1.0)) for key in ["x", "y", "z"]]
         ranges = torch.tensor(range_list, device="cpu")
-        rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device="cpu")
+        rand_samples = math_utils.sample_uniform(
+            ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device="cpu"
+        )
     else:
-        rand_samples = math_utils.sample_uniform(*scale_range, (len(env_ids), 1), device="cpu")
+        rand_samples = math_utils.sample_uniform(
+            *scale_range, (len(env_ids), 1), device="cpu"
+        )
         rand_samples = rand_samples.repeat(1, 3)
     # convert to list for the for loop
     rand_samples = rand_samples.tolist()
@@ -129,7 +133,9 @@ def randomize_rigid_body_scale(
             # if the scale attribute does not exist, create it
             has_scale_attr = scale_spec is not None
             if not has_scale_attr:
-                scale_spec = Sdf.AttributeSpec(prim_spec, prim_path + ".xformOp:scale", Sdf.ValueTypeNames.Double3)
+                scale_spec = Sdf.AttributeSpec(
+                    prim_spec, prim_path + ".xformOp:scale", Sdf.ValueTypeNames.Double3
+                )
 
             # set the new scale
             scale_spec.default = Gf.Vec3f(*rand_samples[i])
@@ -139,12 +145,18 @@ def randomize_rigid_body_scale(
             # note: by default isaac sim follows this ordering for the transform stack so any asset
             #   created through it will have the correct ordering
             if not has_scale_attr:
-                op_order_spec = prim_spec.GetAttributeAtPath(prim_path + ".xformOpOrder")
+                op_order_spec = prim_spec.GetAttributeAtPath(
+                    prim_path + ".xformOpOrder"
+                )
                 if op_order_spec is None:
                     op_order_spec = Sdf.AttributeSpec(
-                        prim_spec, UsdGeom.Tokens.xformOpOrder, Sdf.ValueTypeNames.TokenArray
+                        prim_spec,
+                        UsdGeom.Tokens.xformOpOrder,
+                        Sdf.ValueTypeNames.TokenArray,
                     )
-                op_order_spec.default = Vt.TokenArray(["xformOp:translate", "xformOp:orient", "xformOp:scale"])
+                op_order_spec.default = Vt.TokenArray(
+                    ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                )
 
 
 class randomize_rigid_body_material(ManagerTermBase):
@@ -200,7 +212,9 @@ class randomize_rigid_body_material(ManagerTermBase):
         # obtain number of shapes per body (needed for indexing the material properties correctly)
         # note: this is a workaround since the Articulation does not provide a direct way to obtain the number of shapes
         #  per body. We use the physics simulation view to obtain the number of shapes per body.
-        if isinstance(self.asset, Articulation) and self.asset_cfg.body_ids != slice(None):
+        if isinstance(self.asset, Articulation) and self.asset_cfg.body_ids != slice(
+            None
+        ):
             self.num_shapes_per_body = []
             for link_path in self.asset.root_physx_view.link_paths[0]:
                 link_physx_view = self.asset._physics_sim_view.create_rigid_body_view(link_path)  # type: ignore
@@ -228,12 +242,16 @@ class randomize_rigid_body_material(ManagerTermBase):
         #   afterwards these are randomly assigned to the geometries of the asset
         range_list = [static_friction_range, dynamic_friction_range, restitution_range]
         ranges = torch.tensor(range_list, device="cpu")
-        self.material_buckets = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (num_buckets, 3), device="cpu")
+        self.material_buckets = math_utils.sample_uniform(
+            ranges[:, 0], ranges[:, 1], (num_buckets, 3), device="cpu"
+        )
 
         # ensure dynamic friction is always less than static friction
         make_consistent = cfg.params.get("make_consistent", False)
         if make_consistent:
-            self.material_buckets[:, 1] = torch.min(self.material_buckets[:, 0], self.material_buckets[:, 1])
+            self.material_buckets[:, 1] = torch.min(
+                self.material_buckets[:, 0], self.material_buckets[:, 1]
+            )
 
     def __call__(
         self,
@@ -254,7 +272,9 @@ class randomize_rigid_body_material(ManagerTermBase):
 
         # randomly assign material IDs to the geometries
         total_num_shapes = self.asset.root_physx_view.max_shapes
-        bucket_ids = torch.randint(0, num_buckets, (len(env_ids), total_num_shapes), device="cpu")
+        bucket_ids = torch.randint(
+            0, num_buckets, (len(env_ids), total_num_shapes), device="cpu"
+        )
         material_samples = self.material_buckets[bucket_ids]
 
         # retrieve material buffer from the physics simulation
@@ -269,7 +289,9 @@ class randomize_rigid_body_material(ManagerTermBase):
                 end_idx = start_idx + self.num_shapes_per_body[body_id]
                 # assign the new materials
                 # material samples are of shape: num_env_ids x total_num_shapes x 3
-                materials[env_ids, start_idx:end_idx] = material_samples[:, start_idx:end_idx]
+                materials[env_ids, start_idx:end_idx] = material_samples[
+                    :, start_idx:end_idx
+                ]
         else:
             # assign all the materials
             materials[env_ids] = material_samples[:]
@@ -316,7 +338,9 @@ class randomize_rigid_body_mass(ManagerTermBase):
         if cfg.params["operation"] == "scale":
             if "mass_distribution_params" in cfg.params:
                 _validate_scale_range(
-                    cfg.params["mass_distribution_params"], "mass_distribution_params", allow_zero=False
+                    cfg.params["mass_distribution_params"],
+                    "mass_distribution_params",
+                    allow_zero=False,
                 )
         elif cfg.params["operation"] not in ("abs", "add"):
             raise ValueError(
@@ -342,9 +366,13 @@ class randomize_rigid_body_mass(ManagerTermBase):
 
         # resolve body indices
         if self.asset_cfg.body_ids == slice(None):
-            body_ids = torch.arange(self.asset.num_bodies, dtype=torch.int, device="cpu")
+            body_ids = torch.arange(
+                self.asset.num_bodies, dtype=torch.int, device="cpu"
+            )
         else:
-            body_ids = torch.tensor(self.asset_cfg.body_ids, dtype=torch.int, device="cpu")
+            body_ids = torch.tensor(
+                self.asset_cfg.body_ids, dtype=torch.int, device="cpu"
+            )
 
         # get the current masses of the bodies (num_assets, num_bodies)
         masses = self.asset.root_physx_view.get_masses()
@@ -352,13 +380,20 @@ class randomize_rigid_body_mass(ManagerTermBase):
         # apply randomization on default values
         # this is to make sure when calling the function multiple times, the randomization is applied on the
         # default values and not the previously randomized values
-        masses[env_ids[:, None], body_ids] = self.asset.data.default_mass[env_ids[:, None], body_ids].clone()
+        masses[env_ids[:, None], body_ids] = self.asset.data.default_mass[
+            env_ids[:, None], body_ids
+        ].clone()
 
         # sample from the given range
         # note: we modify the masses in-place for all environments
         #   however, the setter takes care that only the masses of the specified environments are modified
         masses = _randomize_prop_by_op(
-            masses, mass_distribution_params, env_ids, body_ids, operation=operation, distribution=distribution
+            masses,
+            mass_distribution_params,
+            env_ids,
+            body_ids,
+            operation=operation,
+            distribution=distribution,
         )
 
         # set the mass into the physics simulation
@@ -367,20 +402,160 @@ class randomize_rigid_body_mass(ManagerTermBase):
         # recompute inertia tensors if needed
         if recompute_inertia:
             # compute the ratios of the new masses to the initial masses
-            ratios = masses[env_ids[:, None], body_ids] / self.asset.data.default_mass[env_ids[:, None], body_ids]
+            ratios = (
+                masses[env_ids[:, None], body_ids]
+                / self.asset.data.default_mass[env_ids[:, None], body_ids]
+            )
             # scale the inertia tensors by the the ratios
             # since mass randomization is done on default values, we can use the default inertia tensors
             inertias = self.asset.root_physx_view.get_inertias()
             if isinstance(self.asset, Articulation):
                 # inertia has shape: (num_envs, num_bodies, 9) for articulation
                 inertias[env_ids[:, None], body_ids] = (
-                    self.asset.data.default_inertia[env_ids[:, None], body_ids] * ratios[..., None]
+                    self.asset.data.default_inertia[env_ids[:, None], body_ids]
+                    * ratios[..., None]
                 )
             else:
                 # inertia has shape: (num_envs, 9) for rigid object
                 inertias[env_ids] = self.asset.data.default_inertia[env_ids] * ratios
             # set the inertia tensors into the physics simulation
             self.asset.root_physx_view.set_inertias(inertias, env_ids)
+
+
+class randomize_fixed_wing_aerodynamic_parameters(ManagerTermBase):
+    """Randomize aerodynamic coefficients on a fixed-wing articulation.
+
+    This term updates the shared fixed-wing configuration, so the sampled values apply to all
+    environments in lockstep. It is best used when you want one randomized vehicle model per run or
+    when you reset all environments together.
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: FixedWing = env.scene[self.asset_cfg.name]
+
+        if not isinstance(self.asset, FixedWing):
+            raise ValueError(
+                "Randomization term 'randomize_fixed_wing_aerodynamic_parameters' is only supported for "
+                f"FixedWing assets, but got: '{type(self.asset)}'."
+            )
+
+        if cfg.params["operation"] == "scale":
+            for name, params in cfg.params.get("wing_parameter_ranges", {}).items():
+                _validate_scale_range(
+                    params, f"wing_parameter_ranges['{name}']", allow_zero=False
+                )
+            for name, params in cfg.params.get("engine_parameter_ranges", {}).items():
+                _validate_scale_range(
+                    params, f"engine_parameter_ranges['{name}']", allow_zero=False
+                )
+            if "rho_distribution_params" in cfg.params:
+                _validate_scale_range(
+                    cfg.params["rho_distribution_params"],
+                    "rho_distribution_params",
+                    allow_zero=False,
+                )
+            if "wing_drag_tensor_range" in cfg.params:
+                _validate_scale_range(
+                    cfg.params["wing_drag_tensor_range"],
+                    "wing_drag_tensor_range",
+                    allow_zero=False,
+                )
+        elif cfg.params["operation"] not in ("abs", "add"):
+            raise ValueError(
+                "Randomization term 'randomize_fixed_wing_aerodynamic_parameters' does not support operation: "
+                f"'{cfg.params['operation']}'."
+            )
+
+        self._base_rho = float(self.asset.cfg.rho)
+        self._base_wing_params = {
+            wing_name: {
+                name: float(getattr(wing_cfg, name))
+                for name in cfg.params.get("wing_parameter_ranges", {})
+            }
+            for wing_name, wing_cfg in self.asset.cfg.wings.items()
+        }
+        self._base_engine_params = {
+            engine_name: {
+                name: float(getattr(engine_cfg, name))
+                for name in cfg.params.get("engine_parameter_ranges", {})
+            }
+            for engine_name, engine_cfg in self.asset.cfg.engines.items()
+        }
+        self._base_wing_drag_tensor = {
+            wing_name: drag_tensor.clone()
+            for wing_name, drag_tensor in self.asset._aerodata.wing_drag_tensor.items()
+        }
+
+    def _randomize_scalar(
+        self,
+        value: float,
+        distribution_params: tuple[float, float],
+        operation: Literal["add", "scale", "abs"],
+        distribution: Literal["uniform", "log_uniform", "gaussian"],
+    ) -> float:
+        data = torch.tensor([[value]], device="cpu")
+        randomized = _randomize_prop_by_op(
+            data, distribution_params, None, slice(None), operation, distribution
+        )
+        return float(randomized.item())
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        env_ids: torch.Tensor | None,
+        asset_cfg: SceneEntityCfg,
+        wing_parameter_ranges: dict[str, tuple[float, float]] | None = None,
+        engine_parameter_ranges: dict[str, tuple[float, float]] | None = None,
+        rho_distribution_params: tuple[float, float] | None = None,
+        wing_drag_tensor_range: tuple[float, float] | None = None,
+        operation: Literal["add", "scale", "abs"] = "scale",
+        distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+    ):
+        del env_ids
+        del asset_cfg
+
+        if wing_parameter_ranges is not None:
+            for wing_name, wing_cfg in self.asset.cfg.wings.items():
+                for name, params in wing_parameter_ranges.items():
+                    if hasattr(wing_cfg, name):
+                        value = self._base_wing_params[wing_name][name]
+                        setattr(
+                            wing_cfg,
+                            name,
+                            self._randomize_scalar(
+                                value, params, operation, distribution
+                            ),
+                        )
+
+        if engine_parameter_ranges is not None:
+            for engine_name, engine_cfg in self.asset.cfg.engines.items():
+                for name, params in engine_parameter_ranges.items():
+                    if hasattr(engine_cfg, name):
+                        value = self._base_engine_params[engine_name][name]
+                        setattr(
+                            engine_cfg,
+                            name,
+                            self._randomize_scalar(
+                                value, params, operation, distribution
+                            ),
+                        )
+
+        if rho_distribution_params is not None:
+            self.asset.cfg.rho = self._randomize_scalar(
+                self._base_rho, rho_distribution_params, operation, distribution
+            )
+
+        if wing_drag_tensor_range is not None:
+            for wing_name, drag_tensor in self.asset._aerodata.wing_drag_tensor.items():
+                scale = self._randomize_scalar(
+                    1.0, wing_drag_tensor_range, operation, distribution
+                )
+                self.asset._aerodata.wing_drag_tensor[wing_name] = (
+                    self._base_wing_drag_tensor[wing_name] * scale
+                )
 
 
 def randomize_rigid_body_com(
@@ -412,7 +587,9 @@ def randomize_rigid_body_com(
     # sample random CoM values
     range_list = [com_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
     ranges = torch.tensor(range_list, device="cpu")
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device="cpu").unsqueeze(1)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device="cpu"
+    ).unsqueeze(1)
 
     # get the current com of the bodies (num_assets, num_bodies)
     coms = asset.root_physx_view.get_coms().clone()
@@ -520,7 +697,9 @@ def randomize_physics_scene_gravity(
     gravity = gravity[0].tolist()
 
     # set the gravity into the physics simulation
-    physics_sim_view: physx.SimulationView = sim_utils.SimulationContext.instance().physics_sim_view
+    physics_sim_view: physx.SimulationView = (
+        sim_utils.SimulationContext.instance().physics_sim_view
+    )
     physics_sim_view.set_gravity(carb.Float3(*gravity))
 
 
@@ -560,10 +739,15 @@ class randomize_actuator_gains(ManagerTermBase):
         if cfg.params["operation"] == "scale":
             if "stiffness_distribution_params" in cfg.params:
                 _validate_scale_range(
-                    cfg.params["stiffness_distribution_params"], "stiffness_distribution_params", allow_zero=False
+                    cfg.params["stiffness_distribution_params"],
+                    "stiffness_distribution_params",
+                    allow_zero=False,
                 )
             if "damping_distribution_params" in cfg.params:
-                _validate_scale_range(cfg.params["damping_distribution_params"], "damping_distribution_params")
+                _validate_scale_range(
+                    cfg.params["damping_distribution_params"],
+                    "damping_distribution_params",
+                )
         elif cfg.params["operation"] not in ("abs", "add"):
             raise ValueError(
                 "Randomization term 'randomize_actuator_gains' does not support operation:"
@@ -586,7 +770,12 @@ class randomize_actuator_gains(ManagerTermBase):
 
         def randomize(data: torch.Tensor, params: tuple[float, float]) -> torch.Tensor:
             return _randomize_prop_by_op(
-                data, params, dim_0_ids=None, dim_1_ids=actuator_indices, operation=operation, distribution=distribution
+                data,
+                params,
+                dim_0_ids=None,
+                dim_1_ids=actuator_indices,
+                operation=operation,
+                distribution=distribution,
             )
 
         # Loop through actuators and randomize gains
@@ -599,16 +788,24 @@ class randomize_actuator_gains(ManagerTermBase):
                 elif isinstance(actuator.joint_indices, torch.Tensor):
                     global_indices = actuator.joint_indices.to(self.asset.device)
                 else:
-                    raise TypeError("Actuator joint indices must be a slice or a torch.Tensor.")
+                    raise TypeError(
+                        "Actuator joint indices must be a slice or a torch.Tensor."
+                    )
             elif isinstance(actuator.joint_indices, slice):
                 # we take the joints defined in the asset config
-                global_indices = actuator_indices = torch.tensor(self.asset_cfg.joint_ids, device=self.asset.device)
+                global_indices = actuator_indices = torch.tensor(
+                    self.asset_cfg.joint_ids, device=self.asset.device
+                )
             else:
                 # we take the intersection of the actuator joints and the asset config joints
                 actuator_joint_indices = actuator.joint_indices
-                asset_joint_ids = torch.tensor(self.asset_cfg.joint_ids, device=self.asset.device)
+                asset_joint_ids = torch.tensor(
+                    self.asset_cfg.joint_ids, device=self.asset.device
+                )
                 # the indices of the joints in the actuator that have to be randomized
-                actuator_indices = torch.nonzero(torch.isin(actuator_joint_indices, asset_joint_ids)).view(-1)
+                actuator_indices = torch.nonzero(
+                    torch.isin(actuator_joint_indices, asset_joint_ids)
+                ).view(-1)
                 if len(actuator_indices) == 0:
                     continue
                 # maps actuator indices that have to be randomized to global joint indices
@@ -616,9 +813,11 @@ class randomize_actuator_gains(ManagerTermBase):
             # Randomize stiffness
             if stiffness_distribution_params is not None:
                 stiffness = actuator.stiffness[env_ids].clone()
-                stiffness[:, actuator_indices] = self.asset.data.default_joint_stiffness[env_ids][
-                    :, global_indices
-                ].clone()
+                stiffness[:, actuator_indices] = (
+                    self.asset.data.default_joint_stiffness[env_ids][
+                        :, global_indices
+                    ].clone()
+                )
                 randomize(stiffness, stiffness_distribution_params)
                 actuator.stiffness[env_ids] = stiffness
                 if isinstance(actuator, ImplicitActuator):
@@ -628,11 +827,15 @@ class randomize_actuator_gains(ManagerTermBase):
             # Randomize damping
             if damping_distribution_params is not None:
                 damping = actuator.damping[env_ids].clone()
-                damping[:, actuator_indices] = self.asset.data.default_joint_damping[env_ids][:, global_indices].clone()
+                damping[:, actuator_indices] = self.asset.data.default_joint_damping[
+                    env_ids
+                ][:, global_indices].clone()
                 randomize(damping, damping_distribution_params)
                 actuator.damping[env_ids] = damping
                 if isinstance(actuator, ImplicitActuator):
-                    self.asset.write_joint_damping_to_sim(damping, joint_ids=actuator.joint_indices, env_ids=env_ids)
+                    self.asset.write_joint_damping_to_sim(
+                        damping, joint_ids=actuator.joint_indices, env_ids=env_ids
+                    )
 
 
 class randomize_joint_parameters(ManagerTermBase):
@@ -672,9 +875,15 @@ class randomize_joint_parameters(ManagerTermBase):
         # check for valid operation
         if cfg.params["operation"] == "scale":
             if "friction_distribution_params" in cfg.params:
-                _validate_scale_range(cfg.params["friction_distribution_params"], "friction_distribution_params")
+                _validate_scale_range(
+                    cfg.params["friction_distribution_params"],
+                    "friction_distribution_params",
+                )
             if "armature_distribution_params" in cfg.params:
-                _validate_scale_range(cfg.params["armature_distribution_params"], "armature_distribution_params")
+                _validate_scale_range(
+                    cfg.params["armature_distribution_params"],
+                    "armature_distribution_params",
+                )
         elif cfg.params["operation"] not in ("abs", "add"):
             raise ValueError(
                 "Randomization term 'randomize_fixed_tendon_parameters' does not support operation:"
@@ -701,7 +910,9 @@ class randomize_joint_parameters(ManagerTermBase):
         if self.asset_cfg.joint_ids == slice(None):
             joint_ids = slice(None)  # for optimization purposes
         else:
-            joint_ids = torch.tensor(self.asset_cfg.joint_ids, dtype=torch.int, device=self.asset.device)
+            joint_ids = torch.tensor(
+                self.asset_cfg.joint_ids, dtype=torch.int, device=self.asset.device
+            )
 
         # sample joint properties from the given ranges and set into the physics simulation
         # joint friction coefficient
@@ -747,11 +958,17 @@ class randomize_joint_parameters(ManagerTermBase):
                 viscous_friction_coeff = torch.clamp(viscous_friction_coeff, min=0.0)
 
                 # Ensure dynamic ≤ static (same shape before indexing)
-                dynamic_friction_coeff = torch.minimum(dynamic_friction_coeff, friction_coeff)
+                dynamic_friction_coeff = torch.minimum(
+                    dynamic_friction_coeff, friction_coeff
+                )
 
                 # Index once at the end
-                dynamic_friction_coeff = dynamic_friction_coeff[env_ids[:, None], joint_ids]
-                viscous_friction_coeff = viscous_friction_coeff[env_ids[:, None], joint_ids]
+                dynamic_friction_coeff = dynamic_friction_coeff[
+                    env_ids[:, None], joint_ids
+                ]
+                viscous_friction_coeff = viscous_friction_coeff[
+                    env_ids[:, None], joint_ids
+                ]
             else:
                 # For versions < 5.0.0, we do not set these values
                 dynamic_friction_coeff = None
@@ -777,11 +994,16 @@ class randomize_joint_parameters(ManagerTermBase):
                 distribution=distribution,
             )
             self.asset.write_joint_armature_to_sim(
-                armature[env_ids[:, None], joint_ids], joint_ids=joint_ids, env_ids=env_ids
+                armature[env_ids[:, None], joint_ids],
+                joint_ids=joint_ids,
+                env_ids=env_ids,
             )
 
         # joint position limits
-        if lower_limit_distribution_params is not None or upper_limit_distribution_params is not None:
+        if (
+            lower_limit_distribution_params is not None
+            or upper_limit_distribution_params is not None
+        ):
             joint_pos_limits = self.asset.data.default_joint_pos_limits.clone()
             # -- randomize the lower limits
             if lower_limit_distribution_params is not None:
@@ -813,7 +1035,10 @@ class randomize_joint_parameters(ManagerTermBase):
                 )
             # set the position limits into the physics simulation
             self.asset.write_joint_position_limit_to_sim(
-                joint_pos_limits, joint_ids=joint_ids, env_ids=env_ids, warn_limit_violation=False
+                joint_pos_limits,
+                joint_ids=joint_ids,
+                env_ids=env_ids,
+                warn_limit_violation=False,
             )
 
 
@@ -851,13 +1076,19 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
         if cfg.params["operation"] == "scale":
             if "stiffness_distribution_params" in cfg.params:
                 _validate_scale_range(
-                    cfg.params["stiffness_distribution_params"], "stiffness_distribution_params", allow_zero=False
+                    cfg.params["stiffness_distribution_params"],
+                    "stiffness_distribution_params",
+                    allow_zero=False,
                 )
             if "damping_distribution_params" in cfg.params:
-                _validate_scale_range(cfg.params["damping_distribution_params"], "damping_distribution_params")
+                _validate_scale_range(
+                    cfg.params["damping_distribution_params"],
+                    "damping_distribution_params",
+                )
             if "limit_stiffness_distribution_params" in cfg.params:
                 _validate_scale_range(
-                    cfg.params["limit_stiffness_distribution_params"], "limit_stiffness_distribution_params"
+                    cfg.params["limit_stiffness_distribution_params"],
+                    "limit_stiffness_distribution_params",
                 )
         elif cfg.params["operation"] not in ("abs", "add"):
             raise ValueError(
@@ -888,7 +1119,11 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
         if self.asset_cfg.fixed_tendon_ids == slice(None):
             tendon_ids = slice(None)  # for optimization purposes
         else:
-            tendon_ids = torch.tensor(self.asset_cfg.fixed_tendon_ids, dtype=torch.int, device=self.asset.device)
+            tendon_ids = torch.tensor(
+                self.asset_cfg.fixed_tendon_ids,
+                dtype=torch.int,
+                device=self.asset.device,
+            )
 
         # sample tendon properties from the given ranges and set into the physics simulation
         # stiffness
@@ -901,7 +1136,9 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
                 operation=operation,
                 distribution=distribution,
             )
-            self.asset.set_fixed_tendon_stiffness(stiffness[env_ids[:, None], tendon_ids], tendon_ids, env_ids)
+            self.asset.set_fixed_tendon_stiffness(
+                stiffness[env_ids[:, None], tendon_ids], tendon_ids, env_ids
+            )
 
         # damping
         if damping_distribution_params is not None:
@@ -913,7 +1150,9 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
                 operation=operation,
                 distribution=distribution,
             )
-            self.asset.set_fixed_tendon_damping(damping[env_ids[:, None], tendon_ids], tendon_ids, env_ids)
+            self.asset.set_fixed_tendon_damping(
+                damping[env_ids[:, None], tendon_ids], tendon_ids, env_ids
+            )
 
         # limit stiffness
         if limit_stiffness_distribution_params is not None:
@@ -930,7 +1169,10 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
             )
 
         # position limits
-        if lower_limit_distribution_params is not None or upper_limit_distribution_params is not None:
+        if (
+            lower_limit_distribution_params is not None
+            or upper_limit_distribution_params is not None
+        ):
             limit = self.asset.data.default_fixed_tendon_pos_limits.clone()
             # -- lower limit
             if lower_limit_distribution_params is not None:
@@ -960,7 +1202,9 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
                     "Randomization term 'randomize_fixed_tendon_parameters' is setting lower tendon limits that are"
                     " greater than upper tendon limits."
                 )
-            self.asset.set_fixed_tendon_position_limit(tendon_limits, tendon_ids, env_ids)
+            self.asset.set_fixed_tendon_position_limit(
+                tendon_limits, tendon_ids, env_ids
+            )
 
         # rest length
         if rest_length_distribution_params is not None:
@@ -972,7 +1216,9 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
                 operation=operation,
                 distribution=distribution,
             )
-            self.asset.set_fixed_tendon_rest_length(rest_length[env_ids[:, None], tendon_ids], tendon_ids, env_ids)
+            self.asset.set_fixed_tendon_rest_length(
+                rest_length[env_ids[:, None], tendon_ids], tendon_ids, env_ids
+            )
 
         # offset
         if offset_distribution_params is not None:
@@ -984,7 +1230,9 @@ class randomize_fixed_tendon_parameters(ManagerTermBase):
                 operation=operation,
                 distribution=distribution,
             )
-            self.asset.set_fixed_tendon_offset(offset[env_ids[:, None], tendon_ids], tendon_ids, env_ids)
+            self.asset.set_fixed_tendon_offset(
+                offset[env_ids[:, None], tendon_ids], tendon_ids, env_ids
+            )
 
         # write the fixed tendon properties into the simulation
         self.asset.write_fixed_tendon_properties_to_sim(tendon_ids, env_ids)
@@ -1010,7 +1258,11 @@ def apply_external_force_torque(
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=asset.device)
     # resolve number of bodies
-    num_bodies = len(asset_cfg.body_ids) if isinstance(asset_cfg.body_ids, list) else asset.num_bodies
+    num_bodies = (
+        len(asset_cfg.body_ids)
+        if isinstance(asset_cfg.body_ids, list)
+        else asset.num_bodies
+    )
 
     # sample random forces and torques
     size = (len(env_ids), num_bodies, 3)
@@ -1018,7 +1270,9 @@ def apply_external_force_torque(
     torques = math_utils.sample_uniform(*torque_range, size, asset.device)
     # set the forces and torques into the buffers
     # note: these are only applied when you call: `asset.write_data_to_sim()`
-    asset.set_external_force_and_torque(forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids)
+    asset.set_external_force_and_torque(
+        forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
+    )
 
 
 def push_by_setting_velocity(
@@ -1042,9 +1296,14 @@ def push_by_setting_velocity(
     # velocities
     vel_w = asset.data.root_vel_w[env_ids]
     # sample random velocities
-    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    range_list = [
+        velocity_range.get(key, (0.0, 0.0))
+        for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+    ]
     ranges = torch.tensor(range_list, device=asset.device)
-    vel_w += math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], vel_w.shape, device=asset.device)
+    vel_w += math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], vel_w.shape, device=asset.device
+    )
     # set the velocities into the physics simulation
     asset.write_root_velocity_to_sim(vel_w, env_ids=env_ids)
 
@@ -1075,22 +1334,38 @@ def reset_root_state_uniform(
     root_states = asset.data.default_root_state[env_ids].clone()
 
     # poses
-    range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    range_list = [
+        pose_range.get(key, (0.0, 0.0))
+        for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+    ]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device
+    )
 
-    positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + rand_samples[:, 0:3]
-    orientations_delta = math_utils.quat_from_euler_xyz(rand_samples[:, 3], rand_samples[:, 4], rand_samples[:, 5])
+    positions = (
+        root_states[:, 0:3] + env.scene.env_origins[env_ids] + rand_samples[:, 0:3]
+    )
+    orientations_delta = math_utils.quat_from_euler_xyz(
+        rand_samples[:, 3], rand_samples[:, 4], rand_samples[:, 5]
+    )
     orientations = math_utils.quat_mul(root_states[:, 3:7], orientations_delta)
     # velocities
-    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    range_list = [
+        velocity_range.get(key, (0.0, 0.0))
+        for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+    ]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device
+    )
 
     velocities = root_states[:, 7:13] + rand_samples
 
     # set into the physics simulation
-    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_pose_to_sim(
+        torch.cat([positions, orientations], dim=-1), env_ids=env_ids
+    )
     asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
 
 
@@ -1129,20 +1404,29 @@ def reset_root_state_with_random_orientation(
     # poses
     range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device=asset.device
+    )
 
     positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + rand_samples
     orientations = math_utils.random_orientation(len(env_ids), device=asset.device)
 
     # velocities
-    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    range_list = [
+        velocity_range.get(key, (0.0, 0.0))
+        for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+    ]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device
+    )
 
     velocities = root_states[:, 7:13] + rand_samples
 
     # set into the physics simulation
-    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_pose_to_sim(
+        torch.cat([positions, orientations], dim=-1), env_ids=env_ids
+    )
     asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
 
 
@@ -1189,27 +1473,42 @@ def reset_root_state_from_terrain(
         )
 
     # sample random valid poses
-    ids = torch.randint(0, valid_positions.shape[2], size=(len(env_ids),), device=env.device)
-    positions = valid_positions[terrain.terrain_levels[env_ids], terrain.terrain_types[env_ids], ids]
+    ids = torch.randint(
+        0, valid_positions.shape[2], size=(len(env_ids),), device=env.device
+    )
+    positions = valid_positions[
+        terrain.terrain_levels[env_ids], terrain.terrain_types[env_ids], ids
+    ]
     positions += asset.data.default_root_state[env_ids, :3]
 
     # sample random orientations
     range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["roll", "pitch", "yaw"]]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device=asset.device
+    )
 
     # convert to quaternions
-    orientations = math_utils.quat_from_euler_xyz(rand_samples[:, 0], rand_samples[:, 1], rand_samples[:, 2])
+    orientations = math_utils.quat_from_euler_xyz(
+        rand_samples[:, 0], rand_samples[:, 1], rand_samples[:, 2]
+    )
 
     # sample random velocities
-    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    range_list = [
+        velocity_range.get(key, (0.0, 0.0))
+        for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+    ]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device
+    )
 
     velocities = asset.data.default_root_state[env_ids, 7:13] + rand_samples
 
     # set into the physics simulation
-    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_pose_to_sim(
+        torch.cat([positions, orientations], dim=-1), env_ids=env_ids
+    )
     asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
 
 
@@ -1239,18 +1538,28 @@ def reset_joints_by_scale(
     joint_vel = asset.data.default_joint_vel[iter_env_ids, asset_cfg.joint_ids].clone()
 
     # scale these values randomly
-    joint_pos *= math_utils.sample_uniform(*position_range, joint_pos.shape, joint_pos.device)
-    joint_vel *= math_utils.sample_uniform(*velocity_range, joint_vel.shape, joint_vel.device)
+    joint_pos *= math_utils.sample_uniform(
+        *position_range, joint_pos.shape, joint_pos.device
+    )
+    joint_vel *= math_utils.sample_uniform(
+        *velocity_range, joint_vel.shape, joint_vel.device
+    )
 
     # clamp joint pos to limits
-    joint_pos_limits = asset.data.soft_joint_pos_limits[iter_env_ids, asset_cfg.joint_ids]
+    joint_pos_limits = asset.data.soft_joint_pos_limits[
+        iter_env_ids, asset_cfg.joint_ids
+    ]
     joint_pos = joint_pos.clamp_(joint_pos_limits[..., 0], joint_pos_limits[..., 1])
     # clamp joint vel to limits
-    joint_vel_limits = asset.data.soft_joint_vel_limits[iter_env_ids, asset_cfg.joint_ids]
+    joint_vel_limits = asset.data.soft_joint_vel_limits[
+        iter_env_ids, asset_cfg.joint_ids
+    ]
     joint_vel = joint_vel.clamp_(-joint_vel_limits, joint_vel_limits)
 
     # set into the physics simulation
-    asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids)
+    asset.write_joint_state_to_sim(
+        joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids
+    )
 
 
 def reset_joints_by_offset(
@@ -1279,18 +1588,28 @@ def reset_joints_by_offset(
     joint_vel = asset.data.default_joint_vel[iter_env_ids, asset_cfg.joint_ids].clone()
 
     # bias these values randomly
-    joint_pos += math_utils.sample_uniform(*position_range, joint_pos.shape, joint_pos.device)
-    joint_vel += math_utils.sample_uniform(*velocity_range, joint_vel.shape, joint_vel.device)
+    joint_pos += math_utils.sample_uniform(
+        *position_range, joint_pos.shape, joint_pos.device
+    )
+    joint_vel += math_utils.sample_uniform(
+        *velocity_range, joint_vel.shape, joint_vel.device
+    )
 
     # clamp joint pos to limits
-    joint_pos_limits = asset.data.soft_joint_pos_limits[iter_env_ids, asset_cfg.joint_ids]
+    joint_pos_limits = asset.data.soft_joint_pos_limits[
+        iter_env_ids, asset_cfg.joint_ids
+    ]
     joint_pos = joint_pos.clamp_(joint_pos_limits[..., 0], joint_pos_limits[..., 1])
     # clamp joint vel to limits
-    joint_vel_limits = asset.data.soft_joint_vel_limits[iter_env_ids, asset_cfg.joint_ids]
+    joint_vel_limits = asset.data.soft_joint_vel_limits[
+        iter_env_ids, asset_cfg.joint_ids
+    ]
     joint_vel = joint_vel.clamp_(-joint_vel_limits, joint_vel_limits)
 
     # set into the physics simulation
-    asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids)
+    asset.write_joint_state_to_sim(
+        joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids
+    )
 
 
 def reset_nodal_state_uniform(
@@ -1320,14 +1639,18 @@ def reset_nodal_state_uniform(
     # position
     range_list = [position_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 1, 3), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 1, 3), device=asset.device
+    )
 
     nodal_state[..., :3] += rand_samples
 
     # velocities
     range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
     ranges = torch.tensor(range_list, device=asset.device)
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 1, 3), device=asset.device)
+    rand_samples = math_utils.sample_uniform(
+        ranges[:, 0], ranges[:, 1], (len(env_ids), 1, 3), device=asset.device
+    )
 
     nodal_state[..., 3:] += rand_samples
 
@@ -1335,7 +1658,9 @@ def reset_nodal_state_uniform(
     asset.write_nodal_state_to_sim(nodal_state, env_ids=env_ids)
 
 
-def reset_scene_to_default(env: ManagerBasedEnv, env_ids: torch.Tensor, reset_joint_targets: bool = False):
+def reset_scene_to_default(
+    env: ManagerBasedEnv, env_ids: torch.Tensor, reset_joint_targets: bool = False
+):
     """Reset the scene to the default state specified in the scene configuration.
 
     If :attr:`reset_joint_targets` is True, the joint position and velocity targets of the articulations are
@@ -1350,24 +1675,36 @@ def reset_scene_to_default(env: ManagerBasedEnv, env_ids: torch.Tensor, reset_jo
         default_root_state[:, 0:3] += env.scene.env_origins[env_ids]
         # set into the physics simulation
         rigid_object.write_root_pose_to_sim(default_root_state[:, :7], env_ids=env_ids)
-        rigid_object.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids=env_ids)
+        rigid_object.write_root_velocity_to_sim(
+            default_root_state[:, 7:], env_ids=env_ids
+        )
     # articulations
     for articulation_asset in env.scene.articulations.values():
         # obtain default and deal with the offset for env origins
         default_root_state = articulation_asset.data.default_root_state[env_ids].clone()
         default_root_state[:, 0:3] += env.scene.env_origins[env_ids]
         # set into the physics simulation
-        articulation_asset.write_root_pose_to_sim(default_root_state[:, :7], env_ids=env_ids)
-        articulation_asset.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids=env_ids)
+        articulation_asset.write_root_pose_to_sim(
+            default_root_state[:, :7], env_ids=env_ids
+        )
+        articulation_asset.write_root_velocity_to_sim(
+            default_root_state[:, 7:], env_ids=env_ids
+        )
         # obtain default joint positions
         default_joint_pos = articulation_asset.data.default_joint_pos[env_ids].clone()
         default_joint_vel = articulation_asset.data.default_joint_vel[env_ids].clone()
         # set into the physics simulation
-        articulation_asset.write_joint_state_to_sim(default_joint_pos, default_joint_vel, env_ids=env_ids)
+        articulation_asset.write_joint_state_to_sim(
+            default_joint_pos, default_joint_vel, env_ids=env_ids
+        )
         # reset joint targets if required
         if reset_joint_targets:
-            articulation_asset.set_joint_position_target(default_joint_pos, env_ids=env_ids)
-            articulation_asset.set_joint_velocity_target(default_joint_vel, env_ids=env_ids)
+            articulation_asset.set_joint_position_target(
+                default_joint_pos, env_ids=env_ids
+            )
+            articulation_asset.set_joint_velocity_target(
+                default_joint_vel, env_ids=env_ids
+            )
     # deformable objects
     for deformable_object in env.scene.deformable_objects.values():
         # obtain default and set into the physics simulation
@@ -1455,7 +1792,9 @@ class randomize_visual_texture_material(ManagerTermBase):
             )
 
         # extract the replicator version
-        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(1)
+        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(
+            1
+        )
 
         # use different path for different version of replicator
         if compare_versions(version, "1.12.4") < 0:
@@ -1498,7 +1837,10 @@ class randomize_visual_texture_material(ManagerTermBase):
 
             # TODO: Should we specify the value when creating the material?
             self.material_prims = rep.functional.create_batch.material(
-                mdl="OmniPBR.mdl", bind_prims=prims_group, count=num_prims, project_uvw=True
+                mdl="OmniPBR.mdl",
+                bind_prims=prims_group,
+                count=num_prims,
+                project_uvw=True,
             )
 
     def __call__(
@@ -1516,30 +1858,44 @@ class randomize_visual_texture_material(ManagerTermBase):
         import omni.replicator.core as rep
 
         # extract the replicator version
-        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(1)
+        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(
+            1
+        )
 
         # use different path for different version of replicator
         if compare_versions(version, "1.12.4") < 0:
             rep.utils.send_og_event(event_name)
         else:
             # read parameters from the configuration
-            texture_paths = texture_paths if texture_paths else self._cfg.params.get("texture_paths")
+            texture_paths = (
+                texture_paths
+                if texture_paths
+                else self._cfg.params.get("texture_paths")
+            )
             texture_rotation = (
-                texture_rotation if texture_rotation else self._cfg.params.get("texture_rotation", (0.0, 0.0))
+                texture_rotation
+                if texture_rotation
+                else self._cfg.params.get("texture_rotation", (0.0, 0.0))
             )
 
             # convert from radians to degrees
             texture_rotation = tuple(math.degrees(angle) for angle in texture_rotation)
 
             num_prims = len(self.material_prims)
-            random_textures = self.texture_rng.generator.choice(texture_paths, size=num_prims)
+            random_textures = self.texture_rng.generator.choice(
+                texture_paths, size=num_prims
+            )
             random_rotations = self.texture_rng.generator.uniform(
                 texture_rotation[0], texture_rotation[1], size=num_prims
             )
 
             # modify the material properties
-            rep.functional.modify.attribute(self.material_prims, "diffuse_texture", random_textures)
-            rep.functional.modify.attribute(self.material_prims, "texture_rotate", random_rotations)
+            rep.functional.modify.attribute(
+                self.material_prims, "diffuse_texture", random_textures
+            )
+            rep.functional.modify.attribute(
+                self.material_prims, "texture_rotate", random_rotations
+            )
 
 
 class randomize_visual_color(ManagerTermBase):
@@ -1603,7 +1959,9 @@ class randomize_visual_color(ManagerTermBase):
         # TODO: Need to make it work for multiple meshes.
 
         # extract the replicator version
-        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(1)
+        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(
+            1
+        )
 
         # use different path for different version of replicator
         if compare_versions(version, "1.12.4") < 0:
@@ -1632,7 +1990,9 @@ class randomize_visual_color(ManagerTermBase):
                 rep_color_randomization()
         else:
             stage = get_current_stage()
-            prims_group = rep.functional.get.prims(path_pattern=mesh_prim_path, stage=stage)
+            prims_group = rep.functional.get.prims(
+                path_pattern=mesh_prim_path, stage=stage
+            )
 
             num_prims = len(prims_group)
             self.color_rng = rep.rng.ReplicatorRNG()
@@ -1645,7 +2005,10 @@ class randomize_visual_color(ManagerTermBase):
 
             # TODO: Should we specify the value when creating the material?
             self.material_prims = rep.functional.create_batch.material(
-                mdl="OmniPBR.mdl", bind_prims=prims_group, count=num_prims, project_uvw=True
+                mdl="OmniPBR.mdl",
+                bind_prims=prims_group,
+                count=num_prims,
+                project_uvw=True,
             )
 
     def __call__(
@@ -1663,7 +2026,9 @@ class randomize_visual_color(ManagerTermBase):
         # we import the module here since we may not always need the replicator
         import omni.replicator.core as rep
 
-        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(1)
+        version = re.match(r"^(\d+\.\d+\.\d+)", rep.__file__.split("/")[-5][21:]).group(
+            1
+        )
 
         # use different path for different version of replicator
         if compare_versions(version, "1.12.4") < 0:
@@ -1681,9 +2046,13 @@ class randomize_visual_color(ManagerTermBase):
                 colors = list(colors)
 
             num_prims = len(self.material_prims)
-            random_colors = self.color_rng.generator.uniform(colors[0], colors[1], size=(num_prims, 3))
+            random_colors = self.color_rng.generator.uniform(
+                colors[0], colors[1], size=(num_prims, 3)
+            )
 
-            rep.functional.modify.attribute(self.material_prims, "diffuse_color_constant", random_colors)
+            rep.functional.modify.attribute(
+                self.material_prims, "diffuse_color_constant", random_colors
+            )
 
 
 """
@@ -1744,11 +2113,17 @@ def _randomize_prop_by_op(
         )
     # perform the operation
     if operation == "add":
-        data[dim_0_ids, dim_1_ids] += dist_fn(*distribution_parameters, (n_dim_0, n_dim_1), device=data.device)
+        data[dim_0_ids, dim_1_ids] += dist_fn(
+            *distribution_parameters, (n_dim_0, n_dim_1), device=data.device
+        )
     elif operation == "scale":
-        data[dim_0_ids, dim_1_ids] *= dist_fn(*distribution_parameters, (n_dim_0, n_dim_1), device=data.device)
+        data[dim_0_ids, dim_1_ids] *= dist_fn(
+            *distribution_parameters, (n_dim_0, n_dim_1), device=data.device
+        )
     elif operation == "abs":
-        data[dim_0_ids, dim_1_ids] = dist_fn(*distribution_parameters, (n_dim_0, n_dim_1), device=data.device)
+        data[dim_0_ids, dim_1_ids] = dist_fn(
+            *distribution_parameters, (n_dim_0, n_dim_1), device=data.device
+        )
     else:
         raise NotImplementedError(
             f"Unknown operation: '{operation}' for property randomization. Please use 'add', 'scale', or 'abs'."
@@ -1791,10 +2166,16 @@ def _validate_scale_range(
         return
     low, high = params
     if not isinstance(low, (int, float)) or not isinstance(high, (int, float)):
-        raise TypeError(f"{name}: expected (low, high) to be a tuple of numbers, got {params}.")
+        raise TypeError(
+            f"{name}: expected (low, high) to be a tuple of numbers, got {params}."
+        )
     if not allow_negative and not allow_zero and low <= 0:
-        raise ValueError(f"{name}: lower bound must be > 0 when using the 'scale' operation (got {low}).")
+        raise ValueError(
+            f"{name}: lower bound must be > 0 when using the 'scale' operation (got {low})."
+        )
     if not allow_negative and allow_zero and low < 0:
-        raise ValueError(f"{name}: lower bound must be ≥ 0 when using the 'scale' operation (got {low}).")
+        raise ValueError(
+            f"{name}: lower bound must be ≥ 0 when using the 'scale' operation (got {low})."
+        )
     if high < low:
         raise ValueError(f"{name}: upper bound ({high}) must be ≥ lower bound ({low}).")
