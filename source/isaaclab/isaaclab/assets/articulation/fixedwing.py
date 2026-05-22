@@ -184,14 +184,17 @@ class FixedWing(Articulation):
             else:
                 blend_factor = ones
 
-            lift_blended = (
-                (1 - blend_factor) * (wing_cfg.C_ll) * torch.sin(1.9 * aoa)
-                + blend_factor * wing_cfg.C_lt * torch.sin(1.9 * aoa)
-                + wing_cfg.C_lq * delta_q
-            )
+            lift_blended = (1 - blend_factor) * (wing_cfg.C_ll) * torch.sin(
+                1.9 * aoa
+            ) + blend_factor * wing_cfg.C_lt * torch.sin(1.9 * aoa)
+
+            lift_q_blended = wing_cfg.C_lq * delta_q * (1 - blend_factor * 0.8)
 
             lift_coeff = (
-                (lift_blended) * self.cfg.rho * wing_cfg.wing_area_projected / 2
+                (lift_blended + lift_q_blended)
+                * self.cfg.rho
+                * wing_cfg.wing_area_projected
+                / 2
             )
             lift = (
                 lift_coeff.unsqueeze(-1)
@@ -214,14 +217,10 @@ class FixedWing(Articulation):
 
             moment_blended = (
                 (1 - blend_factor) * wing_cfg.C_m * torch.sin(2 * aoa)
-            ) + delta_q * wing_cfg.C_mq
+            ) + delta_q * wing_cfg.C_mq * (1 - blend_factor)
 
             moment_coeff = (
                 (moment_blended) * self.cfg.rho * wing_cfg.wing_area_projected / 2
-            )
-
-            angl_drag = -torch.mul(
-                w * torch.abs(w), self._aerodata.wing_drag_tensor[link_name]
             )
 
             torque = moment_coeff.unsqueeze(-1) * torch.norm(
@@ -229,7 +228,6 @@ class FixedWing(Articulation):
             )
 
             forces[:, body_idx, :] = drag + lift
-            torques[:, body_idx, :] = angl_drag
             torques[:, body_idx, 1] = -torque[:, 0]
 
         self._instantaneous_wrench_composer.add_forces_and_torques(

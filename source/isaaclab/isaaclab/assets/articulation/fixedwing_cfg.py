@@ -22,7 +22,7 @@ class FloaterCfg:
 
     def __init__(
         self,
-        C_d: float = 2.25,
+        C_d: float = 1.2,
         C_ds: float = 0.05,
         C_ll: float = 2.6,
         C_lt: float = 1.2,
@@ -56,8 +56,8 @@ class FloaterCfg:
         self.has_controlsurface = has_controlsurface
         self.connected_actuator = connected_actuator
         self.q_reduced_effectiveness = q_reduced_effectiveness
-        self.C_lq = 1.26 * 3.141592653589793 * flap_chord / (chord - flap_chord)
-        self.C_mq = 0.5 * flap_chord / (chord - flap_chord)
+        self.C_lq = 2 * 1.0 * 3.141592653589793 * flap_chord / (chord - flap_chord)
+        self.C_mq = 1.0 * flap_chord / (chord - flap_chord)
         self.mixed_airflow = mixed_airflow
         self.influenced_by = influenced_by
         self.mixed_airflow_coefficient = mixed_airflow_coefficient
