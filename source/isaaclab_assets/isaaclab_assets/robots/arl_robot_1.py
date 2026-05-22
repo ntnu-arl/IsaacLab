@@ -10,6 +10,8 @@ The following configuration parameters are available:
 * :obj:`ARL_ROBOT_1_CFG`: The ARL_Robot_1 with (TODO add motor propeller combination)
 """
 
+from pathlib import Path
+
 import isaaclab.sim as sim_utils
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
@@ -33,9 +35,18 @@ ARL_ROBOT_1_THRUSTER = ThrusterCfg(
 # Configuration - Articulation.
 ##
 
+_LOCAL_ARL_ROBOT_1_USD = (
+    Path(__file__).resolve().parents[4] / "local_assets" / "Robots" / "NTNU" / "ARL-Robot-1" / "arl_robot_1.usd"
+)
+_ARL_ROBOT_1_USD_PATH = (
+    str(_LOCAL_ARL_ROBOT_1_USD)
+    if _LOCAL_ARL_ROBOT_1_USD.is_file()
+    else f"{ISAAC_NUCLEUS_DIR}/Robots/NTNU/ARL-Robot-1/arl_robot_1.usd"
+)
+
 ARL_ROBOT_1_CFG = MultirotorCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NTNU/ARL-Robot-1/arl_robot_1.usd",
+        usd_path=_ARL_ROBOT_1_USD_PATH,
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
