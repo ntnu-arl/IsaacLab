@@ -5,6 +5,7 @@
 
 from dataclasses import MISSING
 import torch
+import numpy as np
 
 from isaaclab.utils import configclass
 
@@ -22,18 +23,23 @@ class FloaterCfg:
 
     def __init__(
         self,
-        C_d: float = 1.2,
-        C_ds: float = 0.05,
-        C_ll: float = 2.6,
-        C_lt: float = 1.2,
-        C_m: float = 0.06,
+        Cd_max=2.1,
+        Cd_s=0.0,
+        Cd_da=0.0,
+        Cl_da=0.0,
+        Cl_max=1.1,
+        Cm_max=0.0,
+        Cm_da=0.0,
+        Cm_s=0.0,
+        dCl_dq=0.0,
+        dCm_dq=0.0,
+        dCd_dq=0.0,
         stallable: bool = True,
         offset_angle: float = 0.0,
         stall_angle: float = 12.0,
         stall_range: float = 8.0,
         width: float = 0.0,
         chord: float = 0.0,
-        flap_chord: float = 0.0,
         has_controlsurface: bool = False,
         connected_actuator: str = "",
         q_reduced_effectiveness: float = 0.4,
@@ -41,23 +47,30 @@ class FloaterCfg:
         influenced_by: str = "",
         mixed_airflow_coefficient: float = 0.3,
     ):
-        self.C_d = C_d
-        self.C_ds = C_ds
-        self.C_ll = C_ll
-        self.C_lt = C_lt
-        self.C_m = C_m
-        self.C_rdp = 1.17 * ((chord * 0.5) ** 3) / 2 * width
-        self.C_rdr = 1.17 * ((width * 0.5) ** 3) / 2 * chord
+
+        self.Cd_max = Cd_max
+        self.Cd_s = Cd_s
+        self.Cd_da = float(np.rad2deg(Cd_da))
+        self.Cl_da = float(np.rad2deg(Cl_da))
+        self.Cl_max = Cl_max
+        self.Cm_max = Cm_max
+        self.Cm_da = float(np.rad2deg(Cm_da))
+        self.Cm_s = Cm_s
+        self.dCl_dq = float(np.rad2deg(dCl_dq))
+        self.dCm_dq = float(np.rad2deg(dCm_dq))
+        self.dCd_dq = float(np.rad2deg(dCd_dq))
+        self.G_rdp = 1.17 * ((chord * 0.5) ** 3) / 2 * width
+        self.G_rdr = 1.17 * ((width * 0.5) ** 3) / 2 * chord
+        self.chord = chord
+        self.width = width
         self.wing_area_projected = width * chord
         self.stallable = stallable
-        self.offset_angle = offset_angle / 180.0 * 3.141592653589793
-        self.stall_angle = stall_angle / 180.0 * 3.141592653589793
-        self.stall_range = stall_range / 180.0 * 3.141592653589793
+        self.offset_angle = float(np.deg2rad(offset_angle))
+        self.stall_angle = float(np.deg2rad(stall_angle))
+        self.stall_range = float(np.deg2rad(stall_range))
         self.has_controlsurface = has_controlsurface
         self.connected_actuator = connected_actuator
         self.q_reduced_effectiveness = q_reduced_effectiveness
-        self.C_lq = 2 * 1.0 * 3.141592653589793 * flap_chord / (chord - flap_chord)
-        self.C_mq = 1.0 * flap_chord / (chord - flap_chord)
         self.mixed_airflow = mixed_airflow
         self.influenced_by = influenced_by
         self.mixed_airflow_coefficient = mixed_airflow_coefficient
