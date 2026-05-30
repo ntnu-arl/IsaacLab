@@ -21,6 +21,7 @@ from .null_command import NullCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import (
+    Figure8AirspeedHeadingCommand,
     NormalVelocityCommand,
     UniformVelocityCommand,
     UniformAirspeedHeadingCommand,
@@ -312,6 +313,69 @@ class UniformAirspeedHeadingCommandCfg(CommandTermCfg):
     # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
+
+
+@configclass
+class Figure8AirspeedHeadingCommandCfg(CommandTermCfg):
+    """Configuration for the figure-8 airspeed, heading, and altitude command generator."""
+
+    class_type: type = Figure8AirspeedHeadingCommand
+
+    asset_name: str = MISSING
+    """Name of the asset in the environment for which the commands are generated."""
+
+    trajectory_error_heading_gain: float = 0.05
+    """Gain that slowly pulls the figure-8 trajectory center toward the robot position."""
+
+    trajectory_error_airspeed_gain: float = 0.05
+    """Gain that slowly pulls the figure-8 trajectory center toward the robot position."""
+
+    reset_trajectory_distance: float = 5.0
+    """Distance threshold after which the figure-8 trajectory center is reset to the robot position."""
+
+    alt_command: bool = False
+    """Whether to use heading command or angular velocity command. Defaults to False.
+
+    If True, the angular velocity command is computed from the heading error, where the
+    target heading is sampled uniformly from provided range. Otherwise, the angular velocity
+    command is sampled uniformly from provided range.
+    """
+
+    @configclass
+    class Ranges:
+        """Uniform distribution ranges for the velocity commands."""
+
+        airspeed: tuple[float, float] = MISSING
+        """Range for the airspeed command (in m/s)."""
+
+        size: tuple[float, float] = MISSING
+        """Range for the figure-8 size command (in m)."""
+
+        altitude: tuple[float, float] = MISSING
+        """Range for the altitude command (in m)."""
+
+    ranges: Ranges = MISSING
+    """Distribution ranges for the velocity commands."""
+
+    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/velocity_goal"
+    )
+    """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
+
+    goal_pos_visualizer_cfg: VisualizationMarkersCfg = POSITION_GOAL_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/position_goal"
+    )
+    """The configuration for the goal position visualization marker. Defaults to POSITION_GOAL_MARKER_CFG."""
+
+    current_vel_visualizer_cfg: VisualizationMarkersCfg = (
+        BLUE_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_current")
+    )
+    """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
+
+    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
+    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
+    current_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
+    goal_pos_visualizer_cfg.markers["target_far"].radius = 0.3
 
 
 @configclass
