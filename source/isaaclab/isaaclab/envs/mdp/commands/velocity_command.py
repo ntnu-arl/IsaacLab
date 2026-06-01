@@ -19,11 +19,19 @@ from isaaclab.assets import Articulation
 from isaaclab.managers import CommandTerm
 from isaaclab.markers import VisualizationMarkers
 
+from isaaclab.utils.math import (
+    wrap_to_pi,
+    euler_xyz_from_quat,
+    quat_apply,
+    quat_from_euler_xyz,
+)
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
     from .commands_cfg import (
         Figure8AirspeedHeadingCommandCfg,
+        Figure8ControllerCommandCfg,
         NormalVelocityCommandCfg,
         UniformVelocityCommandCfg,
         UniformAirspeedHeadingCommandCfg,
@@ -629,7 +637,7 @@ class Figure8AirspeedHeadingCommand(CommandTerm):
     @property
     def command(self) -> torch.Tensor:
         """The desired command in world frame. Shape is (num_envs, 5)."""
-        return torch.cat([self.sha_command, self.pos_command_w], dim=1)
+        return self.sha_command
 
     def _update_metrics(self):
         # time for which the command was executed
@@ -687,10 +695,6 @@ class Figure8AirspeedHeadingCommand(CommandTerm):
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
-            if not hasattr(self, "goal_pos_visualizer"):
-                self.goal_pos_visualizer = VisualizationMarkers(
-                    self.cfg.goal_pos_visualizer_cfg
-                )
             if not hasattr(self, "goal_vel_visualizer"):
                 self.goal_vel_visualizer = VisualizationMarkers(
                     self.cfg.goal_vel_visualizer_cfg
@@ -698,6 +702,205 @@ class Figure8AirspeedHeadingCommand(CommandTerm):
             if not hasattr(self, "current_vel_visualizer"):
                 self.current_vel_visualizer = VisualizationMarkers(
                     self.cfg.current_vel_visualizer_cfg
+                )
+            self.goal_vel_visualizer.set_visibility(True)
+            self.current_vel_visualizer.set_visibility(True)
+        else:
+            if hasattr(self, "goal_vel_visualizer"):
+                self.goal_vel_visualizer.set_visibility(False)
+            if hasattr(self, "current_vel_visualizer"):
+                self.current_vel_visualizer.set_visibility(False)
+
+    def _debug_vis_callback(self, event):
+        if not self.robot.is_initialized:
+            return
+
+        robot_pos_w = self.robot.data.root_pos_w
+        robot_pos_w[:, 2] += 0.1
+
+        vel_des_arrow_scale, vel_des_arrow_quat = self._resolve_ah_velocity_to_arrow(
+            self.sha_command[:, :2]
+        )
+        vel_arrow_scale, vel_arrow_quat = self._resolve_xy_velocity_to_arrow(
+            self.robot.data.root_lin_vel_w[:, :2]
+        )
+
+        self.goal_vel_visualizer.visualize(
+            robot_pos_w,
+            vel_des_arrow_quat,
+            vel_des_arrow_scale,
+        )
+        self.current_vel_visualizer.visualize(
+            robot_pos_w, vel_arrow_quat, vel_arrow_scale
+        )
+
+    def _resolve_xy_velocity_to_arrow(
+        self, xy_velocity: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        default_scale = self.goal_vel_visualizer.cfg.markers["arrow"].scale
+        arrow_scale = torch.tensor(default_scale, device=self.device).repeat(
+            xy_velocity.shape[0], 1
+        )
+        arrow_scale[:, 0] *= torch.linalg.norm(xy_velocity, dim=1)
+        heading_angle = torch.atan2(xy_velocity[:, 1], xy_velocity[:, 0])
+        zeros = torch.zeros_like(heading_angle)
+        arrow_quat = math_utils.quat_from_euler_xyz(zeros, zeros, heading_angle)
+
+        return arrow_scale, arrow_quat
+
+    def _resolve_ah_velocity_to_arrow(
+        self, ah_velocity: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        default_scale = self.goal_vel_visualizer.cfg.markers["arrow"].scale
+        arrow_scale = torch.tensor(default_scale, device=self.device).repeat(
+            ah_velocity.shape[0], 1
+        )
+        arrow_scale[:, 0] *= ah_velocity[:, 0]
+        heading_angle = ah_velocity[:, 1]
+        zeros = torch.zeros_like(heading_angle)
+        arrow_quat = math_utils.quat_from_euler_xyz(zeros, zeros, heading_angle)
+
+        return arrow_scale, arrow_quat
+
+
+class Figure8ControllerCommand(CommandTerm):
+    r"""Command generator that generates a figure-8 target position, airspeed, and heading.
+
+    The command comprises a target position in world frame, an airspeed command, and a heading
+    command. The target position follows a time-parameterized figure-8 curve, while the airspeed
+    and altitude are sampled when the command is resampled. The trajectory center is slowly
+    adapted toward the robot position and is reset to the robot position when the separation gets
+    too large.
+
+    The figure-8 geometry is controlled by the sampled ``size`` parameter. Larger sizes produce
+    slower turns for the same commanded airspeed.
+    """
+
+    cfg: Figure8ControllerCommandCfg
+    """The configuration of the command generator."""
+
+    def __init__(self, cfg: Figure8ControllerCommandCfg, env: ManagerBasedEnv):
+        """Initialize the command generator.
+
+        Args:
+            cfg: The configuration of the command generator.
+            env: The environment.
+
+        Raises:
+            ValueError: If the altitude command is active but the altitude range is not provided.
+        """
+        super().__init__(cfg, env)
+
+        if self.cfg.ranges.altitude is None:
+            raise ValueError(
+                "The figure-8 command requires the `ranges.altitude` parameter to be set."
+            )
+
+        self.robot: Articulation = env.scene[cfg.asset_name]
+
+        self.pos_command_w = torch.zeros(self.num_envs, 3, device=self.device)
+        self.sha_command = torch.zeros(self.num_envs, 3, device=self.device)
+        self._figure8_speed = torch.zeros(self.num_envs, device=self.device)
+        self._figure8_center_w = torch.zeros(self.num_envs, 3, device=self.device)
+        self._figure8_size = torch.ones(self.num_envs, device=self.device)
+        self._figure8_phase_offset = torch.zeros(self.num_envs, device=self.device)
+        self._figure8_altitude = torch.zeros(self.num_envs, device=self.device)
+        self._figure8_time = torch.zeros(self.num_envs, device=self.device)
+
+        self.metrics["error_position"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_airspeed"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_heading"] = torch.zeros(self.num_envs, device=self.device)
+
+    def __str__(self) -> str:
+        """Return a string representation of the command generator."""
+        msg = "Figure8ControllerCommand:\n"
+        msg += f"\tCommand dimension: {tuple(self.command.shape[1:])}\n"
+        msg += f"\tResampling time range: {self.cfg.resampling_time_range}\n"
+        msg += f"\tTarget position enabled: True"
+        return msg
+
+    @property
+    def command(self) -> torch.Tensor:
+        """The desired command in world frame. Shape is (num_envs, 5)."""
+        return self.sha_command
+
+    def _update_metrics(self):
+        # time for which the command was executed
+        max_command_time = self.cfg.resampling_time_range[1]
+        max_command_step = max_command_time / self._env.step_dt
+
+        self.metrics["error_position"] += (
+            torch.linalg.norm(self.pos_command_w - self.robot.data.root_pos_w, dim=-1)
+            / max_command_step
+        )
+        self.metrics["error_airspeed"] += (
+            self.sha_command[:, 0] - self.robot.data.root_lin_vel_b[:, 0]
+        ) / max_command_step
+        self.metrics["error_heading"] += (
+            torch.abs(
+                math_utils.wrap_to_pi(
+                    self.sha_command[:, 1] - self.robot.data.heading_w
+                )
+            )
+        ) / max_command_step
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        r = torch.empty(len(env_ids), device=self.device)
+        self._figure8_speed[env_ids] = r.uniform_(*self.cfg.ranges.airspeed)
+        self._figure8_center_w[env_ids] = self._env.scene.env_origins[env_ids]
+        self._figure8_size[env_ids] = r.uniform_(*self.cfg.ranges.size)
+        self._figure8_phase_offset[env_ids] = 0  # r.uniform_(0.0, 2.0 * torch.pi)
+        self._figure8_altitude[env_ids] = r.uniform_(*self.cfg.ranges.altitude)
+        self._figure8_time[env_ids] = 0.0
+
+    def _update_command(self):
+        dt = self._env.step_dt
+        self._figure8_time += dt
+
+        size = torch.clamp(self._figure8_size, min=1e-6)
+        phase = (
+            self._figure8_phase_offset
+            + (self._figure8_speed / size) * self._figure8_time
+        )
+
+        self.pos_command_w[:, 0] = self._figure8_center_w[:, 0] + size * torch.sin(
+            phase
+        )
+        self.pos_command_w[:, 1] = self._figure8_center_w[
+            :, 1
+        ] + 0.5 * size * torch.sin(2.0 * phase)
+        self.pos_command_w[:, 2] = self._figure8_altitude
+
+        tangent_x = torch.cos(phase)
+        tangent_y = torch.cos(2.0 * phase)
+        self.sha_command[:, 0] = self._figure8_speed
+        self.sha_command[:, 1] = math_utils.wrap_to_pi(
+            torch.atan2(tangent_y, tangent_x)
+        )
+        self.sha_command[:, 2] = self._figure8_altitude
+
+        target_vector = self.pos_command_w - self.robot.data.root_pos_w
+        zeros = torch.zeros_like(self.robot.data.heading_w)
+        heading = quat_from_euler_xyz(zeros, zeros, -self.robot.data.heading_w)
+        target_vector_b = quat_apply(heading, target_vector)
+
+        self.sha_command[:, 0] += target_vector_b[:, 0] * self.cfg.airspeed_gain
+        self.sha_command[:, 1] += target_vector_b[:, 1] * self.cfg.heading_gain
+        self.sha_command[:, 2] += target_vector_b[:, 2] * self.cfg.altitude_gain
+
+    def _set_debug_vis_impl(self, debug_vis: bool):
+        if debug_vis:
+            if not hasattr(self, "goal_vel_visualizer"):
+                self.goal_vel_visualizer = VisualizationMarkers(
+                    self.cfg.goal_vel_visualizer_cfg
+                )
+            if not hasattr(self, "current_vel_visualizer"):
+                self.current_vel_visualizer = VisualizationMarkers(
+                    self.cfg.current_vel_visualizer_cfg
+                )
+            if not hasattr(self, "goal_pos_visualizer"):
+                self.goal_pos_visualizer = VisualizationMarkers(
+                    self.cfg.goal_pos_visualizer_cfg
                 )
             self.goal_pos_visualizer.set_visibility(True)
             self.goal_vel_visualizer.set_visibility(True)
@@ -724,7 +927,6 @@ class Figure8AirspeedHeadingCommand(CommandTerm):
             self.robot.data.root_lin_vel_w[:, :2]
         )
 
-        self.goal_pos_visualizer.visualize(self.pos_command_w, None)
         self.goal_vel_visualizer.visualize(
             robot_pos_w,
             vel_des_arrow_quat,
@@ -733,6 +935,7 @@ class Figure8AirspeedHeadingCommand(CommandTerm):
         self.current_vel_visualizer.visualize(
             robot_pos_w, vel_arrow_quat, vel_arrow_scale
         )
+        self.goal_pos_visualizer.visualize(self.pos_command_w, None, None)
 
     def _resolve_xy_velocity_to_arrow(
         self, xy_velocity: torch.Tensor

@@ -7,12 +7,14 @@
 
 from .commands_cfg import (
     Figure8AirspeedHeadingCommandCfg,
+    Figure8ControllerCommandCfg,
     NormalVelocityCommandCfg,
     NullCommandCfg,
     TerrainBasedPose2dCommandCfg,
     UniformPose2dCommandCfg,
     UniformPoseCommandCfg,
     UniformVelocityCommandCfg,
+    UniformAirspeedHeadingCommandCfg,
 )
 from .null_command import NullCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
@@ -21,4 +23,6 @@ from .velocity_command import (
     Figure8AirspeedHeadingCommand,
     NormalVelocityCommand,
     UniformVelocityCommand,
+    UniformAirspeedHeadingCommand,
+    Figure8ControllerCommand,
 )
