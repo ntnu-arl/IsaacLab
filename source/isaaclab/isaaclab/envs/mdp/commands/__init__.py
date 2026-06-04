@@ -6,7 +6,6 @@
 """Various command terms that can be used in the environment."""
 
 from .commands_cfg import (
-    Figure8AirspeedHeadingCommandCfg,
     Figure8ControllerCommandCfg,
     NormalVelocityCommandCfg,
     NullCommandCfg,
@@ -20,7 +19,6 @@ from .null_command import NullCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import (
-    Figure8AirspeedHeadingCommand,
     NormalVelocityCommand,
     UniformVelocityCommand,
     UniformAirspeedHeadingCommand,

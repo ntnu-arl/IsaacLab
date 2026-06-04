@@ -21,7 +21,6 @@ from .null_command import NullCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import (
-    Figure8AirspeedHeadingCommand,
     Figure8ControllerCommand,
     NormalVelocityCommand,
     UniformVelocityCommand,
@@ -296,46 +295,6 @@ class UniformAirspeedHeadingCommandCfg(CommandTermCfg):
         """Range for the linear-z velocity command (in m/s)."""
 
         altitude: tuple[float, float] | None = None
-        """Range for the altitude command (in m)."""
-
-    ranges: Ranges = MISSING
-    """Distribution ranges for the velocity commands."""
-
-    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_goal"
-    )
-    """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
-
-    current_vel_visualizer_cfg: VisualizationMarkersCfg = (
-        BLUE_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_current")
-    )
-    """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
-
-    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
-    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
-    current_vel_visualizer_cfg.markers["arrow"].scale = (0.2, 0.2, 0.2)
-
-
-@configclass
-class Figure8AirspeedHeadingCommandCfg(CommandTermCfg):
-    """Configuration for the figure-8 airspeed, heading, and altitude command generator."""
-
-    class_type: type = Figure8AirspeedHeadingCommand
-
-    asset_name: str = MISSING
-    """Name of the asset in the environment for which the commands are generated."""
-
-    @configclass
-    class Ranges:
-        """Uniform distribution ranges for the velocity commands."""
-
-        airspeed: tuple[float, float] = MISSING
-        """Range for the airspeed command (in m/s)."""
-
-        size: tuple[float, float] = MISSING
-        """Range for the figure-8 size command (in m)."""
-
-        altitude: tuple[float, float] = MISSING
         """Range for the altitude command (in m)."""
 
     ranges: Ranges = MISSING
