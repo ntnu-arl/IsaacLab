@@ -46,7 +46,7 @@ _ARL_ROBOT_1_USD_PATH = (
 
 ARL_ROBOT_1_CFG = MultirotorCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=_ARL_ROBOT_1_USD_PATH,
+        usd_path=_ARL_ROBOT_1_USD_PATH,  #        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NTNU/ARL-Robot-1/arl_robot_1.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
