@@ -172,8 +172,8 @@ class MultirotorCfg(ArticulationCfg):
     """
 
     allocation_matrix: Sequence[Sequence[float]] | None = None
-    """Allocation matrix for control allocation. Default is ``None``, which means that the thrusters
-    are not used for control allocation.
+    """Allocation matrix for control allocation. Default is ``None``, which triggers automatic
+    computation from the USD geometry when :attr:`rotor_directions` is set.
 
     This matrix maps individual thruster forces to the 6D wrench (force + torque)
     applied to the multirotor's base link. It has shape ``(6, num_thrusters)``:
@@ -197,8 +197,8 @@ class MultirotorCfg(ArticulationCfg):
             ]
 
     Note:
-        If ``None``, forces must be applied through other means. For typical
-        multirotor control, this should always be specified.
+        If ``None``, the matrix is computed at initialization from thruster poses,
+        the articulation center of mass, and :attr:`rotor_directions`.
     """
 
     rotor_directions: Sequence[int] | None = None
@@ -228,6 +228,18 @@ class MultirotorCfg(ArticulationCfg):
         actuators configuration, otherwise a ``ValueError`` will be raised
         during initialization.
     """
+
+    lin_drag_linear_coef: float = 0.0
+    """Linear drag coefficient on translational velocity [N·s/m]."""
+
+    lin_drag_quadratic_coef: float = 0.0
+    """Quadratic drag coefficient on translational velocity [N·s^2/m^2]."""
+
+    ang_drag_linear_coef: float = 0.0
+    """Linear drag coefficient on angular velocity [N·m·s/rad]."""
+
+    ang_drag_quadratic_coef: float = 0.0
+    """Quadratic drag coefficient on angular velocity [N·m·s^2/rad^2]."""
 
     def __post_init__(self):
         """Post initialization validation."""
