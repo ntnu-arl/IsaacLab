@@ -579,21 +579,21 @@ class Multirotor(Articulation):
         )
 
     def _write_external_wrenches_to_sim(self):
-        """Compose and apply pending external wrenches to the simulation."""
+        """Compose and apply pending external wrenches to the simulation.
+
+        Matches :meth:`isaaclab_physx.assets.articulation.Articulation.write_data_to_sim`.
+        Articulation does not cache RigidObject-style ``_get_inst_wrench_*`` views.
+        """
         if self._instantaneous_wrench_composer.active or self._permanent_wrench_composer.active:
             if self._instantaneous_wrench_composer.active:
                 composer = self._instantaneous_wrench_composer
                 composer.add_raw_buffers_from(self._permanent_wrench_composer)
-                get_force_data = self._get_inst_wrench_force_f32
-                get_torque_data = self._get_inst_wrench_torque_f32
             else:
                 composer = self._permanent_wrench_composer
-                get_force_data = self._get_perm_wrench_force_f32
-                get_torque_data = self._get_perm_wrench_torque_f32
             composer.compose_to_body_frame()
             self.root_view.apply_forces_and_torques_at_position(
-                force_data=get_force_data(),
-                torque_data=get_torque_data(),
+                force_data=composer.out_force_b.warp.flatten().view(wp.float32),
+                torque_data=composer.out_torque_b.warp.flatten().view(wp.float32),
                 position_data=None,
                 indices=self._ALL_INDICES,
                 is_global=False,
