@@ -18,6 +18,7 @@ from isaaclab_physx.assets.articulation import Articulation
 from isaaclab_physx.assets.kernels import split_state_to_root_pose_and_vel
 
 import isaaclab.utils.string as string_utils
+from isaaclab.utils.math import normalize, quat_apply, quat_apply_inverse
 
 from isaaclab_contrib.actuators import Thruster
 from isaaclab_contrib.utils.types import MultiRotorActions
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
 
 # import logger
 logger = logging.getLogger(__name__)
+
+_BASE_BODY_INDEX = 0
 
 
 class Multirotor(Articulation):
@@ -170,6 +173,11 @@ class Multirotor(Articulation):
         Returns:
             Allocation matrix as a torch tensor on the device.
         """
+        if self.cfg.allocation_matrix is None:
+            raise RuntimeError(
+                "Allocation matrix is None. This should have been computed during initialization. "
+                "Please check that _compute_allocation_matrix() was called."
+            )
         return torch.tensor(self.cfg.allocation_matrix, device=self.device, dtype=torch.float32)
 
     """
@@ -245,6 +253,8 @@ class Multirotor(Articulation):
         # reset multirotor-specific data
         if env_ids is None:
             env_ids = self._ALL_INDICES
+        if isinstance(env_ids, wp.array):
+            env_ids = wp.to_torch(env_ids)
         elif not isinstance(env_ids, torch.Tensor):
             env_ids = torch.tensor(env_ids, dtype=torch.long, device=self.device)
 
@@ -253,30 +263,18 @@ class Multirotor(Articulation):
             self._data.thrust_target[env_ids] = self._data.default_thruster_rps[env_ids]
 
     def write_data_to_sim(self):
-        """Write thrust and torque commands to the simulation.
+        """Write thrust commands and external wrenches to the simulation.
 
-        This method performs the following operations in sequence:
-
-        1. **Apply actuator models**: Process thrust targets through thruster actuator models
-           to compute actual thrust values considering dynamics (rise/fall times) and
-           constraints (thrust limits).
-
-        2. **Combine thrusts into wrench**: Use the allocation matrix to convert individual
-           thruster forces into a combined 6D wrench (force + torque) vector.
-
-        3. **Apply to simulation**: Apply the combined wrench to the base link of the multirotor
-           in the PhysX simulation.
-
-        This method should be called after setting thrust targets with :meth:`set_thrust_target`
-        and before stepping the simulation.
-
-        Note:
-            This method overrides the base class implementation because multirotors use thrust-based
-            control rather than joint-based control.
+        Thruster forces are combined through the allocation matrix, applied through the
+        instantaneous wrench composer, and merged with any permanent external wrenches
+        before being written to PhysX.
         """
         self._apply_actuator_model()
-        # apply thruster forces at individual locations
-        self._apply_combined_wrench()
+        self._combine_thrusts()
+        self._apply_combined_wrench_to_composer()
+        self._apply_drag()
+        self._write_external_wrenches_to_sim()
+        self._instantaneous_wrench_composer.reset()
 
     """
     Internal methods
@@ -294,10 +292,16 @@ class Multirotor(Articulation):
         self._create_thruster_buffers()
         # Process thruster configuration
         self._process_thruster_cfg()
+
+        if self.cfg.allocation_matrix is None:
+            self._compute_allocation_matrix()
+
         # Process configuration
         self._process_cfg()
         # Update the robot data
         self.update(0.0)
+
+        self._base_body_ids = torch.tensor([_BASE_BODY_INDEX], dtype=torch.long, device=self.device)
 
         # Log multirotor information
         self._log_multirotor_info()
@@ -431,7 +435,7 @@ class Multirotor(Articulation):
         all_thruster_names = []
 
         for actuator_name, actuator_cfg in self.cfg.actuators.items():
-            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr)
+            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr, preserve_order=True)
 
             # Create 0-based thruster array indices starting from current count
             start_idx = len(all_thruster_names)
@@ -514,30 +518,179 @@ class Multirotor(Articulation):
             self._data.computed_thrust[:, actuator.thruster_indices] = actuator.computed_thrust
             self._data.applied_thrust[:, actuator.thruster_indices] = actuator.applied_thrust
 
-    def _apply_combined_wrench(self):
-        """Apply combined wrench to the base link.
+    def _apply_combined_wrench_to_composer(self):
+        """Add the allocation-matrix wrench to the instantaneous wrench composer."""
+        forces = self._internal_force_target_sim[:, _BASE_BODY_INDEX, :]
+        torques = self._internal_torque_target_sim[:, _BASE_BODY_INDEX, :]
 
-        This internal method applies the 6D wrench (computed by :meth:`_combine_thrusts`)
-        to the base link of the multirotor. The wrench is applied at the center of mass
-        of the base link in the local body frame.
+        com_pos_b = self._compute_articulation_com()
+        base_com_pos_b = self.data.body_com_pos_b.torch[0, _BASE_BODY_INDEX, :]
+        r_com_offset = com_pos_b - base_com_pos_b
 
-        The forces and torques are applied through PhysX's force/torque API, which integrates
-        them during the physics step to produce accelerations and velocities.
-        """
-        # Combine individual thrusts into a wrench vector
-        self._combine_thrusts()
-
-        # Convert torch tensors to Warp arrays for PhysX API
-        force_data_wp = wp.from_torch(self._internal_force_target_sim.view(-1, 3), dtype=wp.float32)
-        torque_data_wp = wp.from_torch(self._internal_torque_target_sim.view(-1, 3), dtype=wp.float32)
-
-        self.root_view.apply_forces_and_torques_at_position(
-            force_data=force_data_wp,  # Shape: (num_envs * num_bodies, 3)
-            torque_data=torque_data_wp,  # Shape: (num_envs * num_bodies, 3)
-            position_data=None,  # Apply at center of mass
-            indices=self._ALL_INDICES,
-            is_global=False,  # Forces are in local frame
+        extra_torque = torch.cross(
+            r_com_offset.unsqueeze(0).expand(self.num_instances, -1),
+            forces,
+            dim=1,
         )
+        torques_corrected = torques - extra_torque
+
+        positions = com_pos_b.unsqueeze(0).unsqueeze(0).expand(self.num_instances, 1, -1)
+        self.instantaneous_wrench_composer.add_forces_and_torques_index(
+            forces=forces.unsqueeze(1),
+            torques=torques_corrected.unsqueeze(1),
+            positions=positions,
+            body_ids=self._base_body_ids,
+            is_global=False,
+        )
+
+    def _apply_drag(self):
+        """Apply aerodynamic drag through the instantaneous wrench composer."""
+        if (
+            self.cfg.lin_drag_linear_coef == 0.0
+            and self.cfg.lin_drag_quadratic_coef == 0.0
+            and self.cfg.ang_drag_linear_coef == 0.0
+            and self.cfg.ang_drag_quadratic_coef == 0.0
+        ):
+            return
+
+        lin_vel_w = self.data.body_link_lin_vel_w.torch[:, _BASE_BODY_INDEX, :]
+        ang_vel_w = self.data.body_link_ang_vel_w.torch[:, _BASE_BODY_INDEX, :]
+        link_quat_w = self.data.body_link_quat_w.torch[:, _BASE_BODY_INDEX, :]
+        ang_vel_b = quat_apply_inverse(link_quat_w, ang_vel_w)
+
+        lin_vel_norm = torch.linalg.vector_norm(lin_vel_w, dim=-1, keepdim=True)
+        lin_drag = (
+            -self.cfg.lin_drag_linear_coef * lin_vel_w - self.cfg.lin_drag_quadratic_coef * lin_vel_norm * lin_vel_w
+        )
+
+        ang_vel_norm = torch.linalg.vector_norm(ang_vel_b, dim=-1, keepdim=True)
+        ang_drag_b = (
+            -self.cfg.ang_drag_linear_coef * ang_vel_b - self.cfg.ang_drag_quadratic_coef * ang_vel_norm * ang_vel_b
+        )
+        ang_drag_w = quat_apply(link_quat_w, ang_drag_b)
+
+        positions = self.data.body_com_pos_w.torch[:, _BASE_BODY_INDEX : _BASE_BODY_INDEX + 1, :3]
+        self.instantaneous_wrench_composer.add_forces_and_torques_index(
+            forces=lin_drag.unsqueeze(1),
+            torques=ang_drag_w.unsqueeze(1),
+            positions=positions,
+            body_ids=self._base_body_ids,
+            is_global=True,
+        )
+
+    def _write_external_wrenches_to_sim(self):
+        """Compose and apply pending external wrenches to the simulation."""
+        if self._instantaneous_wrench_composer.active or self._permanent_wrench_composer.active:
+            if self._instantaneous_wrench_composer.active:
+                composer = self._instantaneous_wrench_composer
+                composer.add_raw_buffers_from(self._permanent_wrench_composer)
+                get_force_data = self._get_inst_wrench_force_f32
+                get_torque_data = self._get_inst_wrench_torque_f32
+            else:
+                composer = self._permanent_wrench_composer
+                get_force_data = self._get_perm_wrench_force_f32
+                get_torque_data = self._get_perm_wrench_torque_f32
+            composer.compose_to_body_frame()
+            self.root_view.apply_forces_and_torques_at_position(
+                force_data=get_force_data(),
+                torque_data=get_torque_data(),
+                position_data=None,
+                indices=self._ALL_INDICES,
+                is_global=False,
+            )
+
+    def _compute_allocation_matrix(self):
+        """Compute the allocation matrix from USD geometry and thruster configuration."""
+        if self.cfg.rotor_directions is None:
+            raise ValueError(
+                "Cannot compute allocation matrix: rotor_directions must be provided "
+                "in config when allocation_matrix is not specified."
+            )
+
+        rotor_directions = self.cfg.rotor_directions
+        cq = 0.0
+        if "thrusters" in self.cfg.actuators:
+            cq = self.cfg.actuators["thrusters"].torque_to_thrust_ratio
+
+        thruster_names_expr = self.cfg.actuators["thrusters"].thruster_names_expr
+        _, thruster_names = self.find_bodies(thruster_names_expr, preserve_order=True)
+        num_thrusters = len(thruster_names)
+
+        if len(rotor_directions) != num_thrusters:
+            raise ValueError(
+                f"Cannot compute allocation matrix: number of rotor_directions ({len(rotor_directions)}) "
+                f"must match number of thrusters ({num_thrusters})"
+            )
+
+        base_link_ids, _ = self.find_bodies("base_link", preserve_order=True)
+        if len(base_link_ids) == 0:
+            raise ValueError("Cannot compute allocation matrix: could not find 'base_link' in articulation")
+        base_link_id = base_link_ids[0]
+
+        self.update(dt=0.0)
+
+        base_pos_w = self.data.body_link_pos_w.torch[0, base_link_id, :]
+        base_quat_w = self.data.body_link_quat_w.torch[0, base_link_id, :]
+        com_pos_b = self._compute_articulation_com()
+        logger.info(f"Computed full articulation COM in base_link frame: {com_pos_b}")
+
+        allocation_matrix = torch.zeros(6, num_thrusters, device=self.device)
+        thrust_dir_local = torch.tensor(self.cfg.thruster_force_direction, device=self.device, dtype=torch.float32)
+        thrust_dir_local = normalize(thrust_dir_local.unsqueeze(0)).squeeze(0)
+
+        for i, thruster_name in enumerate(thruster_names):
+            thruster_body_ids, _ = self.find_bodies(thruster_name, preserve_order=True)
+            if len(thruster_body_ids) == 0:
+                thruster_body_ids, _ = self.find_bodies(f".*{thruster_name}.*", preserve_order=True)
+            if len(thruster_body_ids) == 0:
+                raise ValueError(
+                    f"Cannot compute allocation matrix: could not find body for thruster '{thruster_name}'"
+                )
+
+            thruster_body_id = thruster_body_ids[0]
+            thruster_com_pos_w = self.data.body_com_pos_w.torch[0, thruster_body_id, :3]
+            thruster_quat_w = self.data.body_link_quat_w.torch[0, thruster_body_id, :]
+
+            thruster_com_pos_rel_w = thruster_com_pos_w - base_pos_w
+            thruster_com_pos_b = quat_apply_inverse(base_quat_w, thruster_com_pos_rel_w)
+            thruster_pos_com_b = thruster_com_pos_b - com_pos_b
+
+            thrust_dir_w = quat_apply(thruster_quat_w, thrust_dir_local)
+            thrust_dir_b = quat_apply_inverse(base_quat_w, thrust_dir_w)
+            thrust_dir_b = normalize(thrust_dir_b.unsqueeze(0)).squeeze(0)
+
+            allocation_matrix[0:3, i] = thrust_dir_b
+            torque_from_force = torch.linalg.cross(thruster_pos_com_b, thrust_dir_b)
+            alpha_i = float(rotor_directions[i])
+            rotor_torque = -alpha_i * cq * thrust_dir_b
+            allocation_matrix[3:6, i] = torque_from_force + rotor_torque
+
+        self.cfg.allocation_matrix = allocation_matrix.cpu().numpy().tolist()
+        logger.info(f"Computed allocation matrix from USD file: {num_thrusters} thrusters")
+
+    def _compute_articulation_com(self) -> torch.Tensor:
+        """Compute the center of mass of the entire articulation in the base link frame.
+
+        Returns:
+            COM position in the base link frame [m]. Shape is (3,).
+        """
+        base_link_ids, _ = self.find_bodies("base_link", preserve_order=True)
+        if len(base_link_ids) == 0:
+            raise ValueError("Cannot compute articulation COM: could not find 'base_link' in articulation")
+        base_link_id = base_link_ids[0]
+
+        base_pos_w = self.data.body_link_pos_w.torch[0, base_link_id, :]
+        base_quat_w = self.data.body_link_quat_w.torch[0, base_link_id, :]
+        body_com_pos_w = self.data.body_com_pos_w.torch[0, :, :3]
+        body_masses = self.data.body_mass.torch[0, :]
+
+        total_mass = torch.sum(body_masses)
+        if total_mass < 1e-6:
+            raise ValueError("Cannot compute articulation COM: total mass is too small or zero")
+
+        com_pos_w = torch.einsum("i,ij->j", body_masses, body_com_pos_w) / total_mass
+        com_pos_rel_w = com_pos_w - base_pos_w
+        return quat_apply_inverse(base_quat_w, com_pos_rel_w)
 
     def _combine_thrusts(self):
         """Combine individual thrusts into a wrench vector.
@@ -556,9 +709,8 @@ class Multirotor(Articulation):
         """
         thrusts = self._thrust_target_sim
         self._internal_wrench_target_sim = (self.allocation_matrix @ thrusts.T).T
-        # Apply forces to base link (body index 0) only
-        self._internal_force_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, :3]
-        self._internal_torque_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, 3:]
+        self._internal_force_target_sim[:, _BASE_BODY_INDEX, :] = self._internal_wrench_target_sim[:, :3]
+        self._internal_torque_target_sim[:, _BASE_BODY_INDEX, :] = self._internal_wrench_target_sim[:, 3:]
 
     def _validate_cfg(self):
         """Validate the multirotor configuration after processing.
