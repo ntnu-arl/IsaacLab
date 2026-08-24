@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Newton implementation scaffold for the multirotor asset API."""
+"""Newton implementation of the multirotor asset API."""
 
 from __future__ import annotations
 
@@ -22,16 +22,30 @@ if TYPE_CHECKING:
     from .multirotor_cfg import MultirotorCfg
 
 
+@wp.kernel
+def _write_body_frame_wrench_to_newton(
+    forces_b: wp.array2d(dtype=wp.vec3f),
+    torques_b: wp.array2d(dtype=wp.vec3f),
+    body_link_quat_w: wp.array2d(dtype=wp.quatf),
+    wrench_w: wp.array2d(dtype=wp.spatial_vectorf),
+    env_mask: wp.array(dtype=wp.bool),
+    body_mask: wp.array(dtype=wp.bool),
+):
+    """Rotate body-frame loads into Newton's world-frame external-wrench buffer."""
+    env_index, body_index = wp.tid()
+    if env_mask[env_index] and body_mask[body_index]:
+        link_quat_w = body_link_quat_w[env_index, body_index]
+        force_w = wp.quat_rotate(link_quat_w, forces_b[env_index, body_index])
+        torque_w = wp.quat_rotate(link_quat_w, torques_b[env_index, body_index])
+        wrench_w[env_index, body_index] = wp.spatial_vector(force_w, torque_w, wp.float32)
+
+
 class MultirotorDataNewton(MultirotorDataBase, ArticulationData):
     """Newton data container implementing the common multirotor data API."""
 
 
 class MultirotorNewton(MultirotorBase, Articulation):
-    """Newton implementation scaffold for :class:`MultirotorBase`.
-
-    The common multirotor API and state handling are available, but the Newton wrench write remains part of the next
-    MR-04 implementation step.
-    """
+    """Newton implementation of :class:`MultirotorBase`."""
 
     __backend_name__: str = "newton"
 
@@ -64,5 +78,25 @@ class MultirotorNewton(MultirotorBase, Articulation):
 
     def _write_external_wrenches_to_sim(self) -> None:
         """Compose and apply pending external wrenches to Newton."""
-        # TODO: write the composed body wrenches through Newton's bound external-wrench array.
-        raise NotImplementedError("Newton multirotor wrench application is not implemented yet.")
+        if self._instantaneous_wrench_composer.active or self._permanent_wrench_composer.active:
+            if self._instantaneous_wrench_composer.active:
+                composer = self._instantaneous_wrench_composer
+                composer.add_raw_buffers_from(self._permanent_wrench_composer)
+            else:
+                composer = self._permanent_wrench_composer
+            # Newton's external-wrench state stores world-frame loads, while the shared wrench composer outputs
+            # body-frame loads. Rotate the composed loads using the current link orientations before binding them.
+            composer.compose_to_body_frame()
+            wp.launch(
+                _write_body_frame_wrench_to_newton,
+                dim=(self.num_instances, self.num_bodies),
+                device=self.device,
+                inputs=[
+                    composer.out_force_b,
+                    composer.out_torque_b,
+                    self.data.body_link_quat_w.warp,
+                    self._data._sim_bind_body_external_wrench,
+                    self._ALL_ENV_MASK,
+                    self._ALL_BODY_MASK,
+                ],
+            )

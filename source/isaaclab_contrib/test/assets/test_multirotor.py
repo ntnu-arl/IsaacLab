@@ -486,23 +486,21 @@ def sim(request):
     Uses `build_simulation_context` from the project utils so tests match
     `test_articulation.py` behaviour.
     """
-    device = request.getfixturevalue("device") if "device" in request.fixturenames else "cpu"
     gravity_enabled = request.getfixturevalue("gravity_enabled") if "gravity_enabled" in request.fixturenames else True
     add_ground_plane = (
         request.getfixturevalue("add_ground_plane") if "add_ground_plane" in request.fixturenames else False
     )
 
     with build_simulation_context(
-        device=device, auto_add_lighting=True, gravity_enabled=gravity_enabled, add_ground_plane=add_ground_plane
+        auto_add_lighting=True, gravity_enabled=gravity_enabled, add_ground_plane=add_ground_plane
     ) as sim:
         sim._app_control_on_stop_handle = None
         yield sim
 
 
-@pytest.mark.parametrize("device", ["cpu"])
 @pytest.mark.parametrize("gravity_enabled", [False])
 @pytest.mark.isaacsim_ci
-def test_root_and_motor_link_application_produce_same_rigid_trajectory(sim, device, gravity_enabled):
+def test_root_and_motor_link_application_produce_same_rigid_trajectory(sim, gravity_enabled):
     """Root and motor application produce the same trajectory for a rigid multirotor."""
     root_translation = (-1.0, 0.0, 1.0)
     motor_translation = (1.0, 0.0, 1.0)
@@ -552,9 +550,8 @@ def test_root_and_motor_link_application_produce_same_rigid_trajectory(sim, devi
 
 
 @pytest.mark.parametrize("num_multirotors", [1])
-@pytest.mark.parametrize("device", ["cpu"])  # restrict to cpu for CI without GPUs
 @pytest.mark.isaacsim_ci
-def test_multirotor_thruster_buffers_and_actuators(sim, num_multirotors, device):
+def test_multirotor_thruster_buffers_and_actuators(sim, num_multirotors):
     """Check thruster buffers and actuator wiring in an integration environment.
 
     This test will be skipped automatically when `ARL_ROBOT_1_CFG` is not
@@ -607,9 +604,8 @@ def test_multirotor_thruster_buffers_and_actuators(sim, num_multirotors, device)
 
 
 @pytest.mark.parametrize("integration_scheme", ["euler", "rk4"])
-@pytest.mark.parametrize("device", ["cpu"])
 @pytest.mark.isaacsim_ci
-def test_initialization_and_reset_convert_default_rps_to_thrust(sim, integration_scheme, device):
+def test_initialization_and_reset_convert_default_rps_to_thrust(sim, integration_scheme):
     """Initialization and reset convert motor speed to thrust without a first-step jump."""
     num_multirotors = 2
     translations = torch.zeros(num_multirotors, 3, device=sim.device)
@@ -657,9 +653,8 @@ def test_initialization_and_reset_convert_default_rps_to_thrust(sim, integration
     torch.testing.assert_close(actuator.curr_thrust[reset_env_ids], thrust_before_step)
 
 
-@pytest.mark.parametrize("device", ["cpu"])
 @pytest.mark.isaacsim_ci
-def test_thrust_action_default_offset_converts_rps_to_thrust(sim, device):
+def test_thrust_action_default_offset_converts_rps_to_thrust(sim):
     """The default action offset uses the default thrust in newtons rather than motor RPS."""
     num_multirotors = 2
     translations = torch.zeros(num_multirotors, 3, device=sim.device)
@@ -691,9 +686,8 @@ def test_thrust_action_default_offset_converts_rps_to_thrust(sim, device):
 
 
 @pytest.mark.parametrize("num_multirotors", [1])
-@pytest.mark.parametrize("device", ["cpu"])
 @pytest.mark.isaacsim_ci
-def test_set_thrust_target_broadcasting_integration(sim, num_multirotors, device):
+def test_set_thrust_target_broadcasting_integration(sim, num_multirotors):
     """Ensure `set_thrust_target` broadcasting works in the integration context."""
     cfg = generate_multirotor_cfg()
     multirotor, _ = generate_multirotor(cfg, num_multirotors, device=sim.device)
