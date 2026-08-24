@@ -29,7 +29,7 @@ import isaaclab.sim as sim_utils
 import isaaclab.sim.utils.prims as prim_utils
 from isaaclab.sim import build_simulation_context
 
-import isaaclab_contrib.assets.multirotor.multirotor as multirotor_module
+import isaaclab_contrib.assets.multirotor.multirotor_physx as multirotor_physx_module
 from isaaclab_contrib.actuators import ThrusterCfg
 from isaaclab_contrib.assets import Multirotor, MultirotorCfg
 from isaaclab_contrib.mdp.actions import ThrustAction, ThrustActionCfg
@@ -161,7 +161,7 @@ def test_create_buffers_resolves_root_body(monkeypatch):
         calls.append("data")
         return expected_data
 
-    monkeypatch.setattr(multirotor_module, "MultirotorData", create_data)
+    monkeypatch.setattr(multirotor_physx_module, "MultirotorDataPhysx", create_data)
     monkeypatch.setattr(Articulation, "_create_buffers", lambda self: calls.append("base"))
     multirotor._create_thruster_buffers = lambda: calls.append("thrusters")
 

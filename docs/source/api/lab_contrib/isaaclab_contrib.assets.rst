@@ -8,8 +8,14 @@ isaaclab_contrib.assets
   .. autosummary::
 
     Multirotor
+    MultirotorBase
     MultirotorCfg
     MultirotorData
+    MultirotorDataBase
+    MultirotorDataNewton
+    MultirotorDataPhysx
+    MultirotorNewton
+    MultirotorPhysx
 
 Multirotor Asset
 ----------------
@@ -26,6 +32,40 @@ Multirotor Asset
   :exclude-members: __init__, class_type
 
 .. autoclass:: MultirotorData
+  :members:
+  :inherited-members:
+  :show-inheritance:
+
+Backend-independent API
+-----------------------
+
+.. autoclass:: MultirotorBase
+  :members:
+  :show-inheritance:
+
+.. autoclass:: MultirotorDataBase
+  :members:
+  :show-inheritance:
+
+Backend implementations
+-----------------------
+
+.. autoclass:: MultirotorPhysx
+  :members:
+  :inherited-members:
+  :show-inheritance:
+
+.. autoclass:: MultirotorDataPhysx
+  :members:
+  :inherited-members:
+  :show-inheritance:
+
+.. autoclass:: MultirotorNewton
+  :members:
+  :inherited-members:
+  :show-inheritance:
+
+.. autoclass:: MultirotorDataNewton
   :members:
   :inherited-members:
   :show-inheritance:

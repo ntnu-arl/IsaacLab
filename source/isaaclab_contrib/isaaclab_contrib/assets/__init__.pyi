@@ -5,8 +5,24 @@
 
 __all__ = [
     "Multirotor",
+    "MultirotorBase",
     "MultirotorCfg",
     "MultirotorData",
+    "MultirotorDataBase",
+    "MultirotorDataNewton",
+    "MultirotorDataPhysx",
+    "MultirotorNewton",
+    "MultirotorPhysx",
 ]
 
-from .multirotor import Multirotor, MultirotorCfg, MultirotorData
+from .multirotor import (
+    Multirotor,
+    MultirotorBase,
+    MultirotorCfg,
+    MultirotorData,
+    MultirotorDataBase,
+    MultirotorDataNewton,
+    MultirotorDataPhysx,
+    MultirotorNewton,
+    MultirotorPhysx,
+)
