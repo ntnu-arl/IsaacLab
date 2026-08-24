@@ -63,13 +63,5 @@ ARL_ROBOT_1_CFG = MultirotorCfg(
         },
     ),
     actuators={"thrusters": ARL_ROBOT_1_THRUSTER},
-    rotor_directions=[-1, 1, -1, 1],
-    allocation_matrix=[
-        [0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 1.0],
-        [-0.13, -0.13, 0.13, 0.13],
-        [-0.13, 0.13, 0.13, -0.13],
-        [-0.07, 0.07, -0.07, 0.07],
-    ],
+    rotor_directions=[1, -1, 1, -1],
 )

@@ -5,7 +5,7 @@
 
 from collections.abc import Sequence
 from dataclasses import MISSING
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from isaaclab.assets.articulation import ArticulationCfg
 from isaaclab.utils.configclass import configclass
@@ -154,6 +154,14 @@ class MultirotorCfg(ArticulationCfg):
     """
 
     # multirotor force application settings
+    force_application_level: Literal["root_link", "motor_link"] = "root_link"
+    """Body level at which thruster loads are applied.
+
+    ``"root_link"`` combines all motor loads into one wrench applied to the articulation root body. This preserves
+    the net rigid-body wrench at a lower application cost. ``"motor_link"`` applies each force and reaction torque to
+    its resolved motor body, preserving the load locations required by articulated or flexible vehicles.
+    """
+
     thruster_force_direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
     """Default force direction in body-local frame for thrusters. Default is ``(0.0, 0.0, 1.0)``,
     which is upward along the Z-axis.

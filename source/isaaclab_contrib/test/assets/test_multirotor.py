@@ -23,11 +23,13 @@ import warnings
 
 import pytest
 import torch
+from isaaclab_physx.assets.articulation import Articulation
 
 import isaaclab.sim as sim_utils
 import isaaclab.sim.utils.prims as prim_utils
 from isaaclab.sim import build_simulation_context
 
+import isaaclab_contrib.assets.multirotor.multirotor as multirotor_module
 from isaaclab_contrib.assets import Multirotor, MultirotorCfg
 from isaaclab_contrib.mdp.actions import ThrustAction, ThrustActionCfg
 
@@ -41,6 +43,16 @@ warnings.filterwarnings("ignore", category=pytest.PytestUnraisableExceptionWarni
 # Pre-defined configs
 ##
 from isaaclab_assets.robots.arl_robot_1 import ARL_ROBOT_1_CFG
+
+
+class RecordingWrenchComposer:
+    """Record wrench-composer calls without requiring a simulation backend."""
+
+    def __init__(self):
+        self.calls = []
+
+    def add_forces_and_torques_index(self, **kwargs):
+        self.calls.append(kwargs)
 
 
 def generate_multirotor_cfg(usd_path: str | None = None) -> MultirotorCfg:
@@ -76,13 +88,13 @@ def make_multirotor_stub(num_instances: int, num_thrusters: int, device=torch.de
     # runtime attributes the methods expect
     m.device = device
     m.num_instances = num_instances
-    m.num_bodies = 1
+    m.num_bodies = num_thrusters + 1
 
     # allocation matrix as a plain Python list (the Multirotor property will
     # convert it to a tensor using `self.cfg.allocation_matrix`), so provide
     # it on `m.cfg` like the real object expects.
     alloc_list = [[1.0 if r < 2 and c == r else 0.0 for c in range(num_thrusters)] for r in range(6)]
-    m.cfg = types.SimpleNamespace(allocation_matrix=alloc_list)
+    m.cfg = types.SimpleNamespace(allocation_matrix=alloc_list, force_application_level="root_link")
     # Also provide allocation_matrix directly on the fake object so bound methods
     # that access `self.allocation_matrix` succeed (properties won't dispatch
     # because `m` is not a real Multirotor instance).
@@ -103,12 +115,117 @@ def make_multirotor_stub(num_instances: int, num_thrusters: int, device=torch.de
     m._internal_wrench_target_sim = torch.zeros(num_instances, 6, device=device)
     m._internal_force_target_sim = torch.zeros(num_instances, m.num_bodies, 3, device=device)
     m._internal_torque_target_sim = torch.zeros(num_instances, m.num_bodies, 3, device=device)
+    m._root_body_index = 0
+    m._root_body_ids = torch.tensor([m._root_body_index], dtype=torch.long, device=device)
+    m._thruster_body_ids = torch.arange(1, num_thrusters + 1, dtype=torch.long, device=device)
+    m._thruster_force_directions = torch.tensor([0.0, 0.0, 1.0], device=device).expand(num_thrusters, -1)
+    m._thruster_spin_directions = torch.tensor(
+        [1.0 if index % 2 == 0 else -1.0 for index in range(num_thrusters)], device=device
+    )
+    m._thruster_torque_to_thrust_ratios = torch.full((num_thrusters,), 0.1, device=device)
+    m.instantaneous_wrench_composer = RecordingWrenchComposer()
 
     # bind class methods we want to test onto the fake object
     m._combine_thrusts = types.MethodType(Multirotor._combine_thrusts, m)
+    m._apply_motor_wrenches_to_composer = types.MethodType(Multirotor._apply_motor_wrenches_to_composer, m)
     m.set_thrust_target = types.MethodType(Multirotor.set_thrust_target, m)
 
     return m
+
+
+def test_force_application_level_defaults_to_root_link():
+    """Existing configurations retain combined root-link wrench application by default."""
+    cfg = MultirotorCfg(prim_path="/World/Robot", actuators={})
+    assert cfg.force_application_level == "root_link"
+
+
+def test_create_buffers_resolves_root_body(monkeypatch):
+    """The first articulation body is resolved and cached as the root body."""
+    multirotor = object.__new__(Multirotor)
+    multirotor._device = "cpu"
+    multirotor._initialize_handle = None
+    multirotor._invalidate_initialize_handle = None
+    multirotor._prim_deletion_handle = None
+    multirotor._debug_vis_handle = None
+    multirotor._root_view = types.SimpleNamespace(
+        shared_metatype=types.SimpleNamespace(link_names=["base_link", "motor_1", "motor_2"])
+    )
+
+    calls = []
+    expected_data = types.SimpleNamespace()
+
+    def create_data(root_view, device):
+        assert root_view is multirotor.root_view
+        assert device == multirotor.device
+        calls.append("data")
+        return expected_data
+
+    monkeypatch.setattr(multirotor_module, "MultirotorData", create_data)
+    monkeypatch.setattr(Articulation, "_create_buffers", lambda self: calls.append("base"))
+    multirotor._create_thruster_buffers = lambda: calls.append("thrusters")
+
+    multirotor._create_buffers()
+
+    assert calls == ["data", "base", "thrusters"]
+    assert multirotor.data is expected_data
+    assert multirotor._root_body_index == 0
+    torch.testing.assert_close(multirotor._root_body_ids, torch.tensor([0], dtype=torch.long))
+
+
+@pytest.mark.parametrize(
+    ("force_application_level", "expected_calls"),
+    [
+        ("root_link", ["actuator", "combine", "root", "drag", "write", "reset"]),
+        ("motor_link", ["actuator", "motor", "drag", "write", "reset"]),
+    ],
+)
+def test_write_data_to_sim_selects_force_application_level(force_application_level, expected_calls):
+    """The configured application level selects one load-placement path after common actuator dynamics."""
+    multirotor = make_multirotor_stub(num_instances=1, num_thrusters=2)
+    multirotor.cfg.force_application_level = force_application_level
+    calls = []
+
+    multirotor._apply_actuator_model = lambda: calls.append("actuator")
+    multirotor._combine_thrusts = lambda: calls.append("combine")
+    multirotor._apply_combined_wrench_to_composer = lambda: calls.append("root")
+    multirotor._apply_motor_wrenches_to_composer = lambda: calls.append("motor")
+    multirotor._apply_drag = lambda: calls.append("drag")
+    multirotor._write_external_wrenches_to_sim = lambda: calls.append("write")
+    multirotor._instantaneous_wrench_composer = types.SimpleNamespace(reset=lambda: calls.append("reset"))
+
+    Multirotor.write_data_to_sim(multirotor)
+
+    assert calls == expected_calls
+
+
+def test_motor_link_applies_force_and_reaction_torque_to_each_motor_body():
+    """Motor-link mode applies each signed thrust and reaction torque in its motor-local frame."""
+    multirotor = make_multirotor_stub(num_instances=2, num_thrusters=2)
+    multirotor._thrust_target_sim = torch.tensor([[2.0, 3.0], [-4.0, 5.0]])
+    multirotor._thruster_spin_directions = torch.tensor([1.0, -1.0])
+    multirotor._thruster_torque_to_thrust_ratios = torch.tensor([0.1, 0.2])
+
+    multirotor._apply_motor_wrenches_to_composer()
+
+    assert len(multirotor.instantaneous_wrench_composer.calls) == 1
+    call = multirotor.instantaneous_wrench_composer.calls[0]
+    torch.testing.assert_close(call["body_ids"], torch.tensor([1, 2]))
+    assert call["is_global"] is False
+
+    expected_forces = torch.tensor(
+        [
+            [[0.0, 0.0, 2.0], [0.0, 0.0, 3.0]],
+            [[0.0, 0.0, -4.0], [0.0, 0.0, 5.0]],
+        ]
+    )
+    expected_torques = torch.tensor(
+        [
+            [[0.0, 0.0, -0.2], [0.0, 0.0, 0.6]],
+            [[0.0, 0.0, 0.4], [0.0, 0.0, 1.0]],
+        ]
+    )
+    torch.testing.assert_close(call["forces"], expected_forces)
+    torch.testing.assert_close(call["torques"], expected_torques)
 
 
 @pytest.mark.parametrize("num_instances", [1, 2, 4])
