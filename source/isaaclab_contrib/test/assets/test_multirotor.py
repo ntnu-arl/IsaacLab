@@ -30,6 +30,7 @@ import isaaclab.sim.utils.prims as prim_utils
 from isaaclab.sim import build_simulation_context
 
 import isaaclab_contrib.assets.multirotor.multirotor as multirotor_module
+from isaaclab_contrib.actuators import ThrusterCfg
 from isaaclab_contrib.assets import Multirotor, MultirotorCfg
 from isaaclab_contrib.mdp.actions import ThrustAction, ThrustActionCfg
 
@@ -418,6 +419,66 @@ def generate_multirotor(
         return stub, translations
 
 
+def create_rigid_multirotor_prim(prim_path: str, translation: tuple[float, float, float]):
+    """Create a self-contained rigid multirotor articulation with four fixed motor bodies."""
+    from pxr import Gf, Sdf, UsdGeom, UsdPhysics  # noqa: PLC0415
+
+    stage = sim_utils.get_current_stage()
+    sim_utils.create_prim(prim_path, "Xform", translation=translation)
+    robot_prim = stage.GetPrimAtPath(prim_path)
+    UsdPhysics.ArticulationRootAPI.Apply(robot_prim)
+
+    base_path = f"{prim_path}/base_link"
+    base = UsdGeom.Cube.Define(stage, base_path)
+    base.CreateSizeAttr(0.2)
+    UsdPhysics.RigidBodyAPI.Apply(base.GetPrim())
+    UsdPhysics.CollisionAPI.Apply(base.GetPrim())
+    UsdPhysics.MassAPI.Apply(base.GetPrim()).CreateMassAttr(1.0)
+
+    motor_offsets = [(-0.1, -0.1, 0.0), (-0.1, 0.1, 0.0), (0.1, -0.1, 0.0), (0.1, 0.1, 0.0)]
+    UsdGeom.Scope.Define(stage, f"{prim_path}/joints")
+    for index, offset in enumerate(motor_offsets):
+        motor_path = f"{prim_path}/motor_{index}"
+        motor = UsdGeom.Cube.Define(stage, motor_path)
+        motor.CreateSizeAttr(0.04)
+        motor.AddTranslateOp().Set(Gf.Vec3d(*offset))
+        UsdPhysics.RigidBodyAPI.Apply(motor.GetPrim())
+        UsdPhysics.CollisionAPI.Apply(motor.GetPrim())
+        UsdPhysics.MassAPI.Apply(motor.GetPrim()).CreateMassAttr(0.05)
+
+        joint = UsdPhysics.FixedJoint.Define(stage, f"{prim_path}/joints/motor_{index}")
+        joint.CreateBody0Rel().SetTargets([Sdf.Path(base_path)])
+        joint.CreateBody1Rel().SetTargets([Sdf.Path(motor_path)])
+        joint.CreateLocalPos0Attr(Gf.Vec3f(*offset))
+        joint.CreateLocalPos1Attr(Gf.Vec3f(0.0))
+
+
+def generate_rigid_multirotor_cfg(
+    prim_path: str, translation: tuple[float, float, float], force_application_level: str, dt: float
+) -> MultirotorCfg:
+    """Create a deterministic configuration for the rigid force-application equivalence test."""
+    return MultirotorCfg(
+        prim_path=prim_path,
+        init_state=MultirotorCfg.InitialStateCfg(pos=translation, rps={".*": 0.0}),
+        actuators={
+            "thrusters": ThrusterCfg(
+                dt=dt,
+                thrust_range=(0.0, 20.0),
+                thrust_const_range=(1.0, 1.0),
+                tau_inc_range=(0.05, 0.05),
+                tau_dec_range=(0.05, 0.05),
+                torque_to_thrust_ratio=0.02,
+                use_rps=False,
+                integration_scheme="euler",
+                thruster_names_expr=["motor_0", "motor_1", "motor_2", "motor_3"],
+            )
+        },
+        allocation_matrix=None,
+        rotor_directions=[1, -1, -1, 1],
+        force_application_level=force_application_level,
+    )
+
+
 @pytest.fixture
 def sim(request):
     """Create a simulation context for integration tests (app + sim).
@@ -436,6 +497,58 @@ def sim(request):
     ) as sim:
         sim._app_control_on_stop_handle = None
         yield sim
+
+
+@pytest.mark.parametrize("device", ["cpu"])
+@pytest.mark.parametrize("gravity_enabled", [False])
+@pytest.mark.isaacsim_ci
+def test_root_and_motor_link_application_produce_same_rigid_trajectory(sim, device, gravity_enabled):
+    """Root and motor application produce the same trajectory for a rigid multirotor."""
+    root_translation = (-1.0, 0.0, 1.0)
+    motor_translation = (1.0, 0.0, 1.0)
+    create_rigid_multirotor_prim("/World/RootRobot", root_translation)
+    create_rigid_multirotor_prim("/World/MotorRobot", motor_translation)
+    sim_utils.update_stage()
+
+    root_multirotor = Multirotor(
+        generate_rigid_multirotor_cfg("/World/RootRobot", root_translation, "root_link", float(sim.cfg.dt))
+    )
+    motor_multirotor = Multirotor(
+        generate_rigid_multirotor_cfg("/World/MotorRobot", motor_translation, "motor_link", float(sim.cfg.dt))
+    )
+    sim.reset()
+
+    torch.testing.assert_close(root_multirotor.allocation_matrix, motor_multirotor.allocation_matrix)
+    root_initial_pose = root_multirotor.data.root_link_pose_w.torch.clone()
+    motor_initial_pose = motor_multirotor.data.root_link_pose_w.torch.clone()
+
+    thrust_target = torch.tensor([[1.0, 2.0, 3.0, 4.0]], device=sim.device)
+    root_multirotor.set_thrust_target(thrust_target)
+    motor_multirotor.set_thrust_target(thrust_target)
+
+    for _ in range(20):
+        root_multirotor.write_data_to_sim()
+        motor_multirotor.write_data_to_sim()
+        sim.step(render=False)
+        root_multirotor.update(sim.cfg.dt)
+        motor_multirotor.update(sim.cfg.dt)
+
+    root_displacement = root_multirotor.data.root_link_pose_w.torch[:, :3] - root_initial_pose[:, :3]
+    motor_displacement = motor_multirotor.data.root_link_pose_w.torch[:, :3] - motor_initial_pose[:, :3]
+    assert torch.linalg.vector_norm(root_displacement) > 1.0e-3
+    torch.testing.assert_close(root_displacement, motor_displacement, rtol=2.0e-3, atol=2.0e-4)
+    torch.testing.assert_close(
+        root_multirotor.data.root_link_pose_w.torch[:, 3:],
+        motor_multirotor.data.root_link_pose_w.torch[:, 3:],
+        rtol=2.0e-3,
+        atol=2.0e-4,
+    )
+    torch.testing.assert_close(
+        root_multirotor.data.root_link_vel_w.torch,
+        motor_multirotor.data.root_link_vel_w.torch,
+        rtol=2.0e-3,
+        atol=2.0e-4,
+    )
 
 
 @pytest.mark.parametrize("num_multirotors", [1])
