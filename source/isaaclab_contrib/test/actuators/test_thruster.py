@@ -3,15 +3,6 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from isaaclab.app import AppLauncher
-
-HEADLESS = True
-
-# if not AppLauncher.instance():
-simulation_app = AppLauncher(headless=HEADLESS).app
-
-"""Rest of imports follows"""
-
 from types import SimpleNamespace
 
 import pytest
@@ -63,12 +54,13 @@ def test_zero_thrust_const_is_handled(num_envs, num_motors, device):
 @pytest.mark.parametrize("num_motors", [1, 2, 4])
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_negative_thrust_range_results_finite(num_envs, num_motors, device):
-    """Negative configured thrust ranges are clamped and yield finite outputs after hardening."""
+    """Negative configured thrust ranges in force mode are clamped and yield finite outputs."""
     from isaaclab_contrib.actuators import Thruster
 
     cfg = make_thruster_cfg(num_motors)
     cfg.thrust_range = (-5.0, -1.0)
     cfg.thrust_const_range = (0.05, 0.05)
+    cfg.use_rps = False
 
     thruster_names = [f"t{i}" for i in range(num_motors)]
     thruster_ids = slice(None)
@@ -82,6 +74,49 @@ def test_negative_thrust_range_results_finite(num_envs, num_motors, device):
     thr.compute(action)  # type: ignore[arg-type]
 
     assert torch.isfinite(action.thrusts).all()
+
+
+@pytest.mark.parametrize(
+    ("integration_scheme", "expected_thrust"),
+    [
+        ("euler", [0.4, 0.0, -0.4]),
+        ("rk4", [0.36253333, 0.0, -0.36253333]),
+    ],
+)
+@pytest.mark.parametrize("num_envs", [1, 2, 4])
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_force_domain_tracks_signed_thrust_commands(integration_scheme, expected_thrust, num_envs, device):
+    """Force-domain dynamics track positive, zero, and negative commands after one deterministic step."""
+    from isaaclab_contrib.actuators import Thruster
+
+    cfg = make_thruster_cfg(num_motors=3)
+    cfg.dt = 0.1
+    cfg.thrust_range = (-5.0, 5.0)
+    cfg.max_thrust_rate = 100.0
+    cfg.thrust_const_range = (1.0, 1.0)
+    cfg.tau_inc_range = (0.4, 0.4)
+    cfg.tau_dec_range = (0.4, 0.4)
+    cfg.use_discrete_approximation = True
+    cfg.use_rps = False
+    cfg.integration_scheme = integration_scheme
+
+    thruster = Thruster(
+        cfg,
+        ["positive", "zero", "negative"],
+        slice(None),
+        num_envs,
+        device,
+        torch.zeros(num_envs, 3, device=device),
+    )
+    action = SimpleNamespace(
+        thrusts=torch.tensor([[2.0, 0.0, -2.0]], device=device).repeat(num_envs, 1),
+        thruster_indices=slice(None),
+    )
+
+    output = thruster.compute(action)
+
+    expected = torch.tensor([expected_thrust], device=device).repeat(num_envs, 1)
+    torch.testing.assert_close(output.thrusts, expected)
 
 
 @pytest.mark.parametrize("num_envs", [2, 3, 4])
@@ -139,7 +174,7 @@ def test_mixing_and_integration_modes(num_envs, num_motors, device):
     )  # type: ignore[arg-type]
     # bound method objects are recreated on access; compare underlying functions instead
     assert getattr(thr_d.mixing_factor_function, "__func__", None) is Thruster.discrete_mixing_factor
-    assert getattr(thr_d._step_thrust, "__func__", None) is Thruster.compute_thrust_with_rpm_time_constant
+    assert getattr(thr_d._step_thrust, "__func__", None) is Thruster.compute_thrust_euler
 
     # continuous mixing and RK4
     cfg.use_discrete_approximation = False
@@ -148,7 +183,27 @@ def test_mixing_and_integration_modes(num_envs, num_motors, device):
         cfg, thruster_names, slice(None), num_envs, device, torch.ones(num_envs, num_motors, device=device)
     )  # type: ignore[arg-type]
     assert getattr(thr_c.mixing_factor_function, "__func__", None) is Thruster.continuous_mixing_factor
-    assert getattr(thr_c._step_thrust, "__func__", None) is Thruster.compute_thrust_with_rpm_time_constant_rk4
+    assert getattr(thr_c._step_thrust, "__func__", None) is Thruster.compute_thrust_rk4
+
+
+@pytest.mark.parametrize(
+    ("integration_scheme", "expected_method"),
+    [
+        ("euler", "compute_thrust_euler"),
+        ("rk4", "compute_thrust_rk4"),
+    ],
+)
+def test_force_domain_selects_integration_method(integration_scheme, expected_method):
+    """Force-domain configuration selects the matching Euler or RK4 integration method."""
+    from isaaclab_contrib.actuators import Thruster
+
+    cfg = make_thruster_cfg(num_motors=1)
+    cfg.use_rps = False
+    cfg.integration_scheme = integration_scheme
+
+    thruster = Thruster(cfg, ["t0"], slice(None), 1, "cpu", torch.zeros(1, 1))
+
+    assert getattr(thruster._step_thrust, "__func__", None) is getattr(Thruster, expected_method)
 
 
 @pytest.mark.parametrize("num_envs", [1, 2, 4])

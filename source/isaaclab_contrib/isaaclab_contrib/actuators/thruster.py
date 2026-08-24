@@ -91,11 +91,11 @@ class Thruster:
         else:
             self.mixing_factor_function = self.continuous_mixing_factor
 
-        # Choose stepping kernel once (avoids per-step branching)
+        # Choose the integration scheme once. Each scheme handles the configured state domain.
         if self.cfg.integration_scheme == "euler":
-            self._step_thrust = self.compute_thrust_with_rpm_time_constant
+            self._step_thrust = self.compute_thrust_euler
         elif self.cfg.integration_scheme == "rk4":
-            self._step_thrust = self.compute_thrust_with_rpm_time_constant_rk4
+            self._step_thrust = self.compute_thrust_rk4
         else:
             raise ValueError("integration scheme unknown")
 
@@ -199,31 +199,61 @@ class Thruster:
     def continuous_mixing_factor(self, time_constant: torch.Tensor):
         return 1.0 / time_constant
 
-    def compute_thrust_with_rpm_time_constant(
-        self,
-        des_thrust: torch.Tensor,
-        curr_thrust: torch.Tensor,
-        mixing_factor: torch.Tensor,
-    ):
-        # Avoid negative or NaN values inside sqrt by clamping the ratio to >= 0.
-        current_ratio = torch.clamp(curr_thrust / self.thrust_const, min=0.0)
-        desired_ratio = torch.clamp(des_thrust / self.thrust_const, min=0.0)
-        current_rpm = torch.sqrt(current_ratio)
-        desired_rpm = torch.sqrt(desired_ratio)
-        rpm_error = desired_rpm - current_rpm
-        current_rpm += self.motor_model_rate(rpm_error, mixing_factor) * self.cfg.dt
-        return self.thrust_const * current_rpm**2
-
-    def compute_thrust_with_rpm_time_constant_rk4(
+    def compute_thrust_euler(
         self,
         des_thrust: torch.Tensor,
         curr_thrust: torch.Tensor,
         mixing_factor: torch.Tensor,
     ) -> torch.Tensor:
-        current_ratio = torch.clamp(curr_thrust / self.thrust_const, min=0.0)
-        desired_ratio = torch.clamp(des_thrust / self.thrust_const, min=0.0)
-        current_rpm = torch.sqrt(current_ratio)
-        desired_rpm = torch.sqrt(desired_ratio)
-        rpm_error = desired_rpm - current_rpm
-        current_rpm += self.rk4_integration(rpm_error, mixing_factor)
-        return self.thrust_const * current_rpm**2
+        """Advance the configured motor dynamics with Euler integration.
+
+        Args:
+            des_thrust: Desired per-thruster force [N].
+            curr_thrust: Current per-thruster force [N].
+            mixing_factor: Per-thruster first-order mixing factor [1/s].
+
+        Returns:
+            Updated per-thruster force [N].
+        """
+        if self.cfg.use_rps:
+            # Avoid negative or NaN values inside sqrt by clamping the ratio to >= 0.
+            current_ratio = torch.clamp(curr_thrust / self.thrust_const, min=0.0)
+            desired_ratio = torch.clamp(des_thrust / self.thrust_const, min=0.0)
+            current_rpm = torch.sqrt(current_ratio)
+            desired_rpm = torch.sqrt(desired_ratio)
+            rpm_error = desired_rpm - current_rpm
+            current_rpm += self.motor_model_rate(rpm_error, mixing_factor) * self.cfg.dt
+            return self.thrust_const * current_rpm**2
+
+        thrust_error = des_thrust - curr_thrust
+        curr_thrust[:] += self.motor_model_rate(thrust_error, mixing_factor) * self.cfg.dt
+        return curr_thrust
+
+    def compute_thrust_rk4(
+        self,
+        des_thrust: torch.Tensor,
+        curr_thrust: torch.Tensor,
+        mixing_factor: torch.Tensor,
+    ) -> torch.Tensor:
+        """Advance the configured motor dynamics with RK4 integration.
+
+        Args:
+            des_thrust: Desired per-thruster force [N].
+            curr_thrust: Current per-thruster force [N].
+            mixing_factor: Per-thruster first-order mixing factor [1/s].
+
+        Returns:
+            Updated per-thruster force [N].
+        """
+        if self.cfg.use_rps:
+            current_ratio = torch.clamp(curr_thrust / self.thrust_const, min=0.0)
+            desired_ratio = torch.clamp(des_thrust / self.thrust_const, min=0.0)
+            current_rpm = torch.sqrt(current_ratio)
+            desired_rpm = torch.sqrt(desired_ratio)
+            rpm_error = desired_rpm - current_rpm
+            current_rpm += self.rk4_integration(rpm_error, mixing_factor)
+            return self.thrust_const * current_rpm**2
+
+        thrust_error = des_thrust - curr_thrust
+        curr_thrust[:] += self.rk4_integration(thrust_error, mixing_factor)
+        return curr_thrust

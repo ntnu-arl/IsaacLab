@@ -48,6 +48,14 @@ class ThrusterCfg:
     Used as ``tau_z = torque_to_thrust_ratio * thrust_z * direction``.
     """
 
+    use_rps: bool = True
+    """Whether to integrate the actuator dynamics in the motor-speed domain.
+
+    When enabled, the actuator converts thrust commands [N] to motor speed [rps], integrates the motor-speed state,
+    and converts the result back to thrust [N]. When disabled, the actuator integrates thrust [N] directly, allowing
+    signed thrust commands for reversible motors. Defaults to ``True`` to preserve the existing behavior.
+    """
+
     use_discrete_approximation: bool = True
     """
     Determines how the actuator/motor mixing factor is computed. Defaults to True.
