@@ -29,6 +29,7 @@ import isaaclab.sim.utils.prims as prim_utils
 from isaaclab.sim import build_simulation_context
 
 from isaaclab_contrib.assets import Multirotor, MultirotorCfg
+from isaaclab_contrib.mdp.actions import ThrustAction, ThrustActionCfg
 
 # Best-effort: suppress unraisable destructor warnings emitted during
 # teardown of partially-constructed assets in CI/dev environments. We still
@@ -95,6 +96,7 @@ def make_multirotor_stub(num_instances: int, num_thrusters: int, device=torch.de
     data.applied_thrust = torch.zeros(num_instances, num_thrusters, device=device)
     data.thruster_names = [f"thr_{i}" for i in range(num_thrusters)]
     m._data = data
+    m.data = data
 
     # combined-wrench buffers
     m._thrust_target_sim = torch.zeros_like(m._data.thrust_target)
@@ -372,6 +374,90 @@ def test_multirotor_thruster_buffers_and_actuators(sim, num_multirotors, device)
     assert hasattr(data_container, "applied_thrust")
     applied = data_container.applied_thrust
     assert applied.shape == (num_multirotors, num_thr)
+
+
+@pytest.mark.parametrize("integration_scheme", ["euler", "rk4"])
+@pytest.mark.parametrize("device", ["cpu"])
+@pytest.mark.isaacsim_ci
+def test_initialization_and_reset_convert_default_rps_to_thrust(sim, integration_scheme, device):
+    """Initialization and reset convert motor speed to thrust without a first-step jump."""
+    num_multirotors = 2
+    translations = torch.zeros(num_multirotors, 3, device=sim.device)
+    translations[:, 0] = torch.arange(num_multirotors, device=sim.device) * 2.5
+
+    for i in range(num_multirotors):
+        prim_utils.create_prim(f"/World/Env_{i}", "Xform", translation=translations[i])
+
+    cfg = generate_multirotor_cfg().replace(prim_path="/World/Env_.*/Robot")
+    thruster_cfg = cfg.actuators["thrusters"]
+    thruster_cfg.dt = float(sim.cfg.dt)
+    thruster_cfg.integration_scheme = integration_scheme
+    thruster_cfg.thrust_const_range = (2.0e-5, 2.0e-5)
+    cfg.init_state.rps = {
+        "back_left_prop": 100.0,
+        "back_right_prop": 150.0,
+        "front_left_prop": 200.0,
+        "front_right_prop": 250.0,
+    }
+
+    multirotor = Multirotor(cfg)
+    sim.reset()
+
+    actuator = multirotor.actuators["thrusters"]
+    expected_thrust = actuator.thrust_const * multirotor.data.default_thruster_rps**2
+
+    torch.testing.assert_close(multirotor.data.thrust_target, expected_thrust)
+    torch.testing.assert_close(actuator.curr_thrust, expected_thrust)
+
+    # A partial reset must restore only the selected environment to the same equilibrium.
+    multirotor.data.thrust_target.zero_()
+    actuator.curr_thrust.zero_()
+    reset_env_ids = torch.tensor([1], device=sim.device)
+    multirotor.reset(reset_env_ids)
+    expected_thrust = actuator.thrust_const * multirotor.data.default_thruster_rps**2
+
+    torch.testing.assert_close(multirotor.data.thrust_target[0], torch.zeros_like(expected_thrust[0]))
+    torch.testing.assert_close(actuator.curr_thrust[0], torch.zeros_like(expected_thrust[0]))
+    torch.testing.assert_close(multirotor.data.thrust_target[reset_env_ids], expected_thrust[reset_env_ids])
+    torch.testing.assert_close(actuator.curr_thrust[reset_env_ids], expected_thrust[reset_env_ids])
+
+    # Stepping an actuator already at its default target must not change its thrust.
+    thrust_before_step = actuator.curr_thrust[reset_env_ids].clone()
+    multirotor._apply_actuator_model()
+    torch.testing.assert_close(actuator.curr_thrust[reset_env_ids], thrust_before_step)
+
+
+@pytest.mark.parametrize("device", ["cpu"])
+@pytest.mark.isaacsim_ci
+def test_thrust_action_default_offset_converts_rps_to_thrust(sim, device):
+    """The default action offset uses the default thrust in newtons rather than motor RPS."""
+    num_multirotors = 2
+    translations = torch.zeros(num_multirotors, 3, device=sim.device)
+    translations[:, 0] = torch.arange(num_multirotors, device=sim.device) * 2.5
+
+    for i in range(num_multirotors):
+        prim_utils.create_prim(f"/World/Env_{i}", "Xform", translation=translations[i])
+
+    cfg = generate_multirotor_cfg().replace(prim_path="/World/Env_.*/Robot")
+    cfg.actuators["thrusters"].dt = float(sim.cfg.dt)
+    cfg.actuators["thrusters"].thrust_const_range = (2.0e-5, 2.0e-5)
+    cfg.init_state.rps = {".*": 200.0}
+
+    multirotor = Multirotor(cfg)
+    sim.reset()
+
+    env = types.SimpleNamespace(
+        num_envs=num_multirotors,
+        device=sim.device,
+        scene={"robot": multirotor},
+        sim=sim,
+    )
+    action = ThrustAction(ThrustActionCfg(asset_name="robot", scale=1.0, offset=0.0, use_default_offset=True), env)
+    action.process_actions(torch.zeros(num_multirotors, multirotor.num_thrusters, device=sim.device))
+
+    actuator = multirotor.actuators["thrusters"]
+    expected_offset = actuator.thrust_const * multirotor.data.default_thruster_rps**2
+    torch.testing.assert_close(action.processed_actions, expected_offset)
 
 
 @pytest.mark.parametrize("num_multirotors", [1])
