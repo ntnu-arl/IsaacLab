@@ -124,6 +124,10 @@ class Multirotor(Articulation):
     """
 
     @property
+    def data(self) -> MultirotorData:
+        return self._data
+
+    @property
     def thruster_names(self) -> list[str]:
         """Ordered names of thrusters in the multirotor.
 
@@ -198,9 +202,7 @@ class Multirotor(Articulation):
         and constraints (thrust limits) to these targets.
 
         Args:
-            target: Target thrust values. Shape is (num_envs, num_thrusters) or (num_envs,).
-                The values are typically in the same units as configured in the thruster actuator
-                (e.g., Newtons for force, or revolutions per second for RPS).
+            target: Target thrust values [N]. Shape is (num_envs, num_thrusters) or (num_envs,).
             thruster_ids: Indices of thrusters to set. Defaults to None (all thrusters).
                 Can be a sequence of integers, a slice, or None.
             env_ids: Environment indices to set. Defaults to None (all environments).
@@ -230,7 +232,7 @@ class Multirotor(Articulation):
             env_ids = env_ids[:, None]
 
         # set targets
-        self._data.thrust_target[env_ids, thruster_ids] = target
+        self.data.thrust_target[env_ids, thruster_ids] = target
 
     def reset(self, env_ids: Sequence[int] | None = None):
         """Reset the multirotor to default state.
@@ -259,8 +261,10 @@ class Multirotor(Articulation):
             env_ids = torch.tensor(env_ids, dtype=torch.long, device=self.device)
 
         # reset thruster targets to default values
-        if self._data.thrust_target is not None and self._data.default_thruster_rps is not None:
-            self._data.thrust_target[env_ids] = self._data.default_thruster_rps[env_ids]
+        if self.data.thrust_target is not None and self.data.default_thruster_rps is not None:
+            self.data.thrust_target[env_ids] = (
+                self.actuators["thrusters"].thrust_const[env_ids] * self.data.default_thruster_rps[env_ids] ** 2
+            )
 
     def write_data_to_sim(self):
         """Write thrust commands and external wrenches to the simulation.
@@ -280,95 +284,61 @@ class Multirotor(Articulation):
     Internal methods
     """
 
-    def _initialize_impl(self):
-        """Initialize the multirotor implementation."""
-        # call parent initialization
-        super()._initialize_impl()
-
+    def _create_buffers(self):
         # Replace data container with MultirotorData
         self._data = MultirotorData(self.root_view, self.device)
-
-        # Create thruster buffers with correct size (SINGLE PHASE)
+        super()._create_buffers()
+        # Create thruster buffers with correct size
         self._create_thruster_buffers()
-        # Process thruster configuration
-        self._process_thruster_cfg()
-
-        if self.cfg.allocation_matrix is None:
-            self._compute_allocation_matrix()
-
-        # Process configuration
-        self._process_cfg()
-        # Update the robot data
-        self.update(0.0)
 
         self._base_body_ids = torch.tensor([_BASE_BODY_INDEX], dtype=torch.long, device=self.device)
-
-        # Log multirotor information
-        self._log_multirotor_info()
 
     def _create_thruster_buffers(self):
         """Create thruster buffers with correct size."""
         num_instances = self.num_instances
-        num_thrusters = self._count_thrusters_from_config()
+
+        self._thruster_body_mapping = {}
+        all_thruster_names = []
+        for actuator_name, actuator_cfg in self.cfg.actuators.items():
+            if not hasattr(actuator_cfg, "thruster_names_expr"):
+                continue
+
+            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr, preserve_order=True)
+            start_idx = len(all_thruster_names)
+            thruster_array_indices = list(range(start_idx, start_idx + len(body_indices)))
+            all_thruster_names.extend(thruster_names)
+            self._thruster_body_mapping[actuator_name] = {
+                "body_indices": body_indices,
+                "array_indices": thruster_array_indices,
+                "thruster_names": thruster_names,
+            }
+
+        num_thrusters = len(all_thruster_names)
+        if num_thrusters == 0:
+            raise ValueError(
+                "No thrusters found in actuator configuration. "
+                "Please check 'thruster_names_expr' in the provided 'MultirotorCfg.actuators' configuration."
+            )
 
         # Create thruster data tensors with correct size
-        self._data.default_thruster_rps = torch.zeros(num_instances, num_thrusters, device=self.device)
+        self.data.default_thruster_rps = torch.zeros(num_instances, num_thrusters, device=self.device)
         # thrust after controller and allocation is applied
-        self._data.thrust_target = torch.zeros(num_instances, num_thrusters, device=self.device)
-        self._data.computed_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
-        self._data.applied_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
+        self.data.thrust_target = torch.zeros(num_instances, num_thrusters, device=self.device)
+        self.data.computed_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
+        self.data.applied_thrust = torch.zeros(num_instances, num_thrusters, device=self.device)
 
         # Combined wrench buffers
-        self._thrust_target_sim = torch.zeros_like(self._data.thrust_target)  # thrust after actuator model is applied
+        self._thrust_target_sim = torch.zeros_like(self.data.thrust_target)  # thrust after actuator model is applied
         # wrench target for combined mode
         self._internal_wrench_target_sim = torch.zeros(num_instances, 6, device=self.device)
         # internal force/torque targets per body for combined mode
         self._internal_force_target_sim = torch.zeros(num_instances, self.num_bodies, 3, device=self.device)
         self._internal_torque_target_sim = torch.zeros(num_instances, self.num_bodies, 3, device=self.device)
 
-        # Placeholder thruster names (will be filled during actuator creation)
-        self._data.thruster_names = [f"thruster_{i}" for i in range(num_thrusters)]
-
-    def _count_thrusters_from_config(self) -> int:
-        """Count total number of thrusters from actuator configuration.
-
-        This method parses all actuator configurations to determine the total number
-        of thrusters before they are initialized. It uses the thruster name expressions
-        to find matching bodies in the USD prim.
-
-        Returns:
-            Total number of thrusters across all actuator groups.
-
-        Raises:
-            ValueError: If no thrusters are found in the configuration.
-        """
-        total_thrusters = 0
-
-        for actuator_name, actuator_cfg in self.cfg.actuators.items():
-            if not hasattr(actuator_cfg, "thruster_names_expr"):
-                continue
-
-            # Use find_bodies to count thrusters for this actuator
-            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr)
-            total_thrusters += len(body_indices)
-
-        if total_thrusters == 0:
-            raise ValueError(
-                "No thrusters found in actuator configuration. "
-                "Please check 'thruster_names_expr' in the provided 'MultirotorCfg.actuators' configuration."
-            )
-
-        return total_thrusters
-
-    def _process_actuators_cfg(self):
-        """Override parent method to do nothing - we handle thrusters separately."""
-        # Do nothing - we handle thruster processing in _process_thruster_cfg() otherwise this
-        # gives issues with joint name expressions
-        pass
+        self.data.thruster_names = all_thruster_names
 
     def _process_cfg(self):
-        """Post processing of multirotor configuration parameters."""
-        # Handle root state (like parent does)
+        """Post-processing of multirotor configuration parameters."""
         default_root_state = (
             tuple(self.cfg.init_state.pos)
             + tuple(self.cfg.init_state.rot)
@@ -376,14 +346,10 @@ class Multirotor(Articulation):
             + tuple(self.cfg.init_state.ang_vel)
         )
         default_root_state = torch.tensor(default_root_state, dtype=torch.float, device=self.device)
-        # Repeat for all instances
-        default_root_state_repeated = default_root_state.repeat(self.num_instances, 1)
-        # Convert to warp array and split into pose and vel using kernel
-        default_root_state_wp = wp.from_torch(default_root_state_repeated, dtype=wp.float32)
-        # Create temporary output arrays
+        default_root_state = default_root_state.repeat(self.num_instances, 1)
+        default_root_state_wp = wp.from_torch(default_root_state, dtype=wp.float32)
         pose_output = wp.zeros(self.num_instances, dtype=wp.transformf, device=self.device)
         vel_output = wp.zeros(self.num_instances, dtype=wp.spatial_vectorf, device=self.device)
-        # Split state into pose and vel
         wp.launch(
             split_state_to_root_pose_and_vel,
             dim=self.num_instances,
@@ -391,20 +357,27 @@ class Multirotor(Articulation):
             outputs=[pose_output, vel_output],
             device=self.device,
         )
-        # Set using public setters
-        self._data.default_root_pose = pose_output
-        self._data.default_root_vel = vel_output
+        self.data.default_root_pose = pose_output
+        self.data.default_root_vel = vel_output
 
         # Handle thruster-specific initial state
-        if hasattr(self._data, "default_thruster_rps") and hasattr(self.cfg.init_state, "rps"):
+        if hasattr(self.data, "default_thruster_rps") and hasattr(self.cfg.init_state, "rps"):
             # Match against thruster names
             indices_list, _, values_list = string_utils.resolve_matching_names_values(
-                self.cfg.init_state.rps, self.thruster_names
+                self.cfg.init_state.rps, self.data.thruster_names
             )
             if indices_list:
                 rps_values = torch.tensor(values_list, device=self.device)
-                self._data.default_thruster_rps[:, indices_list] = rps_values
-                self._data.thrust_target[:, indices_list] = rps_values
+                self.data.default_thruster_rps[:, indices_list] = rps_values
+
+    def _process_actuators_cfg(self):
+        """Override parent method to do nothing - we handle thrusters separately."""
+        # We handle thruster processing in _process_thruster_cfg()
+        self._process_thruster_cfg()
+
+        # We compute the allocation matrix after resolving thruster names and mappings
+        if self.cfg.allocation_matrix is None:
+            self._compute_allocation_matrix()
 
     def _process_thruster_cfg(self):
         """Process and apply multirotor thruster properties."""
@@ -428,28 +401,11 @@ class Multirotor(Articulation):
         if has_joints:
             raise ValueError("Regular joint actuators are not supported in Multirotor class.")
 
-        # Store the body-to-thruster mapping
-        self._thruster_body_mapping = {}
-
-        # Track thruster names as we create actuators
-        all_thruster_names = []
-
         for actuator_name, actuator_cfg in self.cfg.actuators.items():
-            body_indices, thruster_names = self.find_bodies(actuator_cfg.thruster_names_expr, preserve_order=True)
-
-            # Create 0-based thruster array indices starting from current count
-            start_idx = len(all_thruster_names)
-            thruster_array_indices = list(range(start_idx, start_idx + len(body_indices)))
-
-            # Track all thruster names
-            all_thruster_names.extend(thruster_names)
-
-            # Store the mapping
-            self._thruster_body_mapping[actuator_name] = {
-                "body_indices": body_indices,
-                "array_indices": thruster_array_indices,
-                "thruster_names": thruster_names,
-            }
+            mapping = self._thruster_body_mapping[actuator_name]
+            body_indices = mapping["body_indices"]
+            thruster_array_indices = mapping["array_indices"]
+            thruster_names = mapping["thruster_names"]
 
             # Create thruster actuator
             actuator: Thruster = actuator_cfg.class_type(
@@ -458,20 +414,18 @@ class Multirotor(Articulation):
                 thruster_ids=thruster_array_indices,
                 num_envs=self.num_instances,
                 device=self.device,
-                init_thruster_rps=self._data.default_thruster_rps[:, thruster_array_indices],
+                init_thruster_rps=self.data.default_thruster_rps[:, thruster_array_indices],
             )
 
-            # Store actuator
+            # Store actuator and initialize its force target from the actuator state
             self.actuators[actuator_name] = actuator
+            self.data.thrust_target[:, thruster_array_indices] = actuator.curr_thrust
 
             # Log information
             logger.info(
                 f"Thruster actuator: {actuator_name} with model '{actuator_cfg.class_type.__name__}'"
                 f" (thruster names: {thruster_names} [{body_indices}])."
             )
-
-        # Update thruster names in data container
-        self._data.thruster_names = all_thruster_names
 
         # Log summary
         logger.info(f"Initialized {len(self.actuators)} thruster actuator(s) for multirotor.")
@@ -503,7 +457,7 @@ class Multirotor(Articulation):
 
             # prepare input for actuator model based on cached data
             control_action = MultiRotorActions(
-                thrusts=self._data.thrust_target[:, actuator.thruster_indices],
+                thrusts=self.data.thrust_target[:, actuator.thruster_indices],
                 thruster_indices=actuator.thruster_indices,
             )
 
@@ -515,8 +469,8 @@ class Multirotor(Articulation):
                 self._thrust_target_sim[:, actuator.thruster_indices] = control_action.thrusts
 
             # update state of the actuator model
-            self._data.computed_thrust[:, actuator.thruster_indices] = actuator.computed_thrust
-            self._data.applied_thrust[:, actuator.thruster_indices] = actuator.applied_thrust
+            self.data.computed_thrust[:, actuator.thruster_indices] = actuator.computed_thrust
+            self.data.applied_thrust[:, actuator.thruster_indices] = actuator.applied_thrust
 
     def _apply_combined_wrench_to_composer(self):
         """Add the allocation-matrix wrench to the instantaneous wrench composer."""
@@ -733,8 +687,11 @@ class Multirotor(Articulation):
                             f"{initial_thrust} not in {thrust_limits}"
                         )
 
-    def _log_multirotor_info(self):
-        """Log multirotor-specific information."""
+    def _log_articulation_info(self):
+        """Log information about the articulation."""
+        super()._log_articulation_info()
+
+        # Exclusive data from Multirotor
         logger.info(f"Multirotor initialized with {self.num_thrusters} thrusters")
         logger.info(f"Thruster names: {self.thruster_names}")
         logger.info(f"Thruster force direction: {self.cfg.thruster_force_direction}")

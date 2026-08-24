@@ -112,14 +112,14 @@ class ThrustActionCfg(ActionTermCfg):
     offset: float | dict[str, float] = 0.0
     """Offset factor for the action. Default is ``0.0``, which means no offset.
 
-    This value is added to the scaled actions to establish a baseline thrust.
+    This value is added to the scaled actions to establish a baseline thrust [N].
     It can be:
 
     - A float: uniform offset for all thrusters (e.g., ``5.0`` for 5N hover thrust)
     - A dict: per-thruster offset using regex patterns
 
     If :attr:`use_default_offset` is ``True``, this value is overwritten by the
-    default thruster RPS from the multirotor configuration.
+    default thrust [N] computed from the configured motor speed and sampled thrust coefficient.
 
     Example:
         .. code-block:: python
@@ -166,8 +166,9 @@ class ThrustActionCfg(ActionTermCfg):
     """Whether to use default thrust configured in the multirotor asset as offset. Default is ``True``.
 
     If ``True``, the :attr:`offset` value is overwritten with the default thruster
-    RPS values from :attr:`MultirotorCfg.init_state.rps`. This is useful for
-    controlling thrust as deviations from the hover state.
+    force [N] computed from :attr:`MultirotorCfg.init_state.rps` and the sampled
+    per-motor thrust coefficient. This is useful for controlling thrust as deviations
+    from the hover state.
 
     If ``False``, the manually specified :attr:`offset` value is used.
     """

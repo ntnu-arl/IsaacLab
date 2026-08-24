@@ -84,7 +84,8 @@ class ThrustAction(ActionTerm):
         # initialize the action term
         super().__init__(cfg, env)
 
-        thruster_names_expr = self._asset.actuators["thrusters"].cfg.thruster_names_expr
+        self._thruster_actuator = self._asset.actuators["thrusters"]
+        thruster_names_expr = self._thruster_actuator.cfg.thruster_names_expr
 
         # resolve the thrusters over which the action term is applied
         self._thruster_ids, self._thruster_names = self._asset.find_bodies(
@@ -144,8 +145,8 @@ class ThrustAction(ActionTerm):
 
         # Handle use_default_offset
         if cfg.use_default_offset:
-            # Use default thruster RPS as offset
-            self._offset = self._asset.data.default_thruster_rps[:, self._thruster_ids].clone()
+            self._offset = torch.zeros_like(self._raw_actions)
+            self._update_default_offset()
 
     """
     Properties
@@ -199,6 +200,16 @@ class ThrustAction(ActionTerm):
             env_ids: Environment indices to reset. Defaults to None (all environments).
         """
         self._raw_actions[env_ids] = 0.0
+        if self.cfg.use_default_offset:
+            self._update_default_offset(env_ids)
+
+    def _update_default_offset(self, env_ids: Sequence[int] | slice | None = None) -> None:
+        """Update the default action offset from motor speed and the sampled thrust coefficient."""
+        if env_ids is None:
+            env_ids = slice(None)
+
+        default_rps = self._asset.data.default_thruster_rps[:, self._thruster_actuator.thruster_indices]
+        self._offset[env_ids] = self._thruster_actuator.thrust_const[env_ids] * default_rps[env_ids] ** 2
 
     def process_actions(self, actions: torch.Tensor):
         r"""Process actions by applying scaling, offset, and clipping.

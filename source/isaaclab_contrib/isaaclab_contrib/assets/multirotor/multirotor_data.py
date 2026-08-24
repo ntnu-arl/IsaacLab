@@ -55,15 +55,15 @@ class MultirotorData(ArticulationData):
     """
 
     thrust_target: torch.Tensor = None
-    """Thrust targets commanded by the user or controller. Shape is ``(num_instances, num_thrusters)``
+    """Thrust targets [N] commanded by the user or controller. Shape is ``(num_instances, num_thrusters)``.
 
     This quantity contains the target thrust values set through the
     :meth:`~isaaclab_contrib.assets.Multirotor.set_thrust_target` method or by
     action terms in RL environments. These targets are processed by the thruster
     actuator models to compute actual applied thrusts.
 
-    The units depend on the actuator model configuration (typically Newtons for
-    force or RPS for rotational speed).
+    Motor speed configured in :attr:`default_thruster_rps` is converted to force before
+    entering this buffer.
     """
 
     ##
@@ -71,7 +71,7 @@ class MultirotorData(ArticulationData):
     ##
 
     computed_thrust: torch.Tensor = None
-    """Computed thrust from the actuator model before clipping. Shape is (num_instances, num_thrusters).
+    """Computed thrust [N] before clipping. Shape is ``(num_instances, num_thrusters)``.
 
     This quantity contains the thrust values computed by the thruster actuator models
     before any clipping or saturation is applied. It represents the "desired" thrust
@@ -90,7 +90,7 @@ class MultirotorData(ArticulationData):
     """
 
     applied_thrust: torch.Tensor = None
-    """Applied thrust from the actuator model after clipping. Shape is (num_instances, num_thrusters).
+    """Applied thrust [N] after clipping. Shape is ``(num_instances, num_thrusters)``.
 
     This quantity contains the final thrust values that are actually applied to the
     simulation after all actuator model processing, including:
