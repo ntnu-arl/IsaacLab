@@ -31,7 +31,7 @@ from isaaclab.sim import build_simulation_context
 
 import isaaclab_contrib.assets.multirotor.multirotor_physx as multirotor_physx_module
 from isaaclab_contrib.actuators import ThrusterCfg
-from isaaclab_contrib.assets import Multirotor, MultirotorCfg
+from isaaclab_contrib.assets import Multirotor, MultirotorCfg, MultirotorPhysx
 from isaaclab_contrib.mdp.actions import ThrustAction, ThrustActionCfg
 
 # Best-effort: suppress unraisable destructor warnings emitted during
@@ -142,7 +142,7 @@ def test_force_application_level_defaults_to_root_link():
 
 def test_create_buffers_resolves_root_body(monkeypatch):
     """The first articulation body is resolved and cached as the root body."""
-    multirotor = object.__new__(Multirotor)
+    multirotor = object.__new__(MultirotorPhysx)
     multirotor._device = "cpu"
     multirotor._initialize_handle = None
     multirotor._invalidate_initialize_handle = None

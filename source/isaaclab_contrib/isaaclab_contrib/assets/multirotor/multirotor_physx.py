@@ -15,19 +15,19 @@ from isaaclab_physx.assets.articulation import Articulation
 from isaaclab_physx.assets.articulation.articulation_data import ArticulationData
 from isaaclab_physx.assets.kernels import split_state_to_root_pose_and_vel
 
-from .multirotor_base import MultirotorBase
-from .multirotor_data_base import MultirotorDataBase
+from .multirotor import Multirotor
+from .multirotor_data import MultirotorData
 
 if TYPE_CHECKING:
     from .multirotor_cfg import MultirotorCfg
 
 
-class MultirotorDataPhysx(MultirotorDataBase, ArticulationData):
+class MultirotorDataPhysx(MultirotorData, ArticulationData):
     """PhysX data container implementing the common multirotor data API."""
 
 
-class MultirotorPhysx(MultirotorBase, Articulation):
-    """PhysX implementation of :class:`MultirotorBase`."""
+class MultirotorPhysx(Multirotor, Articulation):
+    """PhysX implementation of :class:`Multirotor`."""
 
     __backend_name__: str = "physx"
 

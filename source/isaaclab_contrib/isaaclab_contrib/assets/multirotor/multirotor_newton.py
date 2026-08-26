@@ -15,8 +15,8 @@ from isaaclab_newton.assets.articulation import Articulation
 from isaaclab_newton.assets.articulation.articulation_data import ArticulationData
 from isaaclab_newton.assets.kernels import split_state_to_root_pose_and_vel
 
-from .multirotor_base import MultirotorBase
-from .multirotor_data_base import MultirotorDataBase
+from .multirotor import Multirotor
+from .multirotor_data import MultirotorData
 
 if TYPE_CHECKING:
     from .multirotor_cfg import MultirotorCfg
@@ -40,12 +40,12 @@ def _write_body_frame_wrench_to_newton(
         wrench_w[env_index, body_index] = wp.spatial_vector(force_w, torque_w, wp.float32)
 
 
-class MultirotorDataNewton(MultirotorDataBase, ArticulationData):
+class MultirotorDataNewton(MultirotorData, ArticulationData):
     """Newton data container implementing the common multirotor data API."""
 
 
-class MultirotorNewton(MultirotorBase, Articulation):
-    """Newton implementation of :class:`MultirotorBase`."""
+class MultirotorNewton(Multirotor, Articulation):
+    """Newton implementation of :class:`Multirotor`."""
 
     __backend_name__: str = "newton"
 

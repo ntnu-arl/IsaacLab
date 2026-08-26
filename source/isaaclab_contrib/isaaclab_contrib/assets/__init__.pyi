@@ -5,10 +5,8 @@
 
 __all__ = [
     "Multirotor",
-    "MultirotorBase",
     "MultirotorCfg",
     "MultirotorData",
-    "MultirotorDataBase",
     "MultirotorDataNewton",
     "MultirotorDataPhysx",
     "MultirotorNewton",
@@ -17,10 +15,8 @@ __all__ = [
 
 from .multirotor import (
     Multirotor,
-    MultirotorBase,
     MultirotorCfg,
     MultirotorData,
-    MultirotorDataBase,
     MultirotorDataNewton,
     MultirotorDataPhysx,
     MultirotorNewton,

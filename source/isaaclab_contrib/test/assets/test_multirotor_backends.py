@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Temporary PhysX-to-Newton multirotor comparison tests for MR-04."""
+"""PhysX-to-Newton multirotor backend and integration tests."""
 
 from isaaclab.app import AppLauncher
 
@@ -27,10 +27,8 @@ from isaaclab.sim import SimulationCfg, build_simulation_context
 from isaaclab_contrib.actuators import ThrusterCfg
 from isaaclab_contrib.assets import (
     Multirotor,
-    MultirotorBase,
     MultirotorCfg,
     MultirotorData,
-    MultirotorDataBase,
     MultirotorDataPhysx,
     MultirotorPhysx,
 )
@@ -57,15 +55,16 @@ def _make_uninitialized_newton_multirotor(multirotor_type):
     return multirotor
 
 
-def test_default_multirotor_remains_physx_during_validation():
-    """The compatibility API keeps existing configurations on PhysX during the comparison period."""
-    assert Multirotor is MultirotorPhysx
-    assert MultirotorData is MultirotorDataPhysx
+def test_multirotor_exposes_unified_backend_api():
+    """The public multirotor type is a backend factory with the shared API."""
+    assert Multirotor is not MultirotorPhysx
+    assert issubclass(MultirotorPhysx, Multirotor)
+    assert issubclass(MultirotorDataPhysx, MultirotorData)
 
 
 def test_physx_type_implements_the_common_api():
     """The PhysX reference exposes the common multirotor method signatures."""
-    assert issubclass(MultirotorPhysx, (MultirotorBase, PhysxArticulation))
+    assert issubclass(MultirotorPhysx, (Multirotor, PhysxArticulation))
     assert MultirotorPhysx.__backend_name__ == "physx"
 
     common_methods = (
@@ -79,14 +78,14 @@ def test_physx_type_implements_the_common_api():
         "_combine_thrusts",
     )
     for method_name in common_methods:
-        common_signature = inspect.signature(getattr(MultirotorBase, method_name))
+        common_signature = inspect.signature(getattr(Multirotor, method_name))
         assert inspect.signature(getattr(MultirotorPhysx, method_name)) == common_signature
 
 
 def test_newton_type_implements_the_common_api():
     """The Newton implementation exposes the same common multirotor method signatures."""
     NewtonArticulation, MultirotorNewton, _ = import_newton_types()
-    assert issubclass(MultirotorNewton, (MultirotorBase, NewtonArticulation))
+    assert issubclass(MultirotorNewton, (Multirotor, NewtonArticulation))
     assert MultirotorNewton.__backend_name__ == "newton"
 
     common_methods = (
@@ -100,24 +99,24 @@ def test_newton_type_implements_the_common_api():
         "_combine_thrusts",
     )
     for method_name in common_methods:
-        common_signature = inspect.signature(getattr(MultirotorBase, method_name))
+        common_signature = inspect.signature(getattr(Multirotor, method_name))
         assert inspect.signature(getattr(MultirotorNewton, method_name)) == common_signature
 
 
 def test_physx_data_type_implements_the_common_api():
     """The PhysX data container provides the common multirotor state fields."""
-    assert issubclass(MultirotorDataPhysx, MultirotorDataBase)
+    assert issubclass(MultirotorDataPhysx, MultirotorData)
 
-    for field_name in MultirotorDataBase.__annotations__:
+    for field_name in MultirotorData.__annotations__:
         assert hasattr(MultirotorDataPhysx, field_name)
 
 
 def test_newton_data_type_implements_the_common_api():
     """The Newton data container provides the common multirotor state fields."""
     _, _, MultirotorDataNewton = import_newton_types()
-    assert issubclass(MultirotorDataNewton, MultirotorDataBase)
+    assert issubclass(MultirotorDataNewton, MultirotorData)
 
-    for field_name in MultirotorDataBase.__annotations__:
+    for field_name in MultirotorData.__annotations__:
         assert hasattr(MultirotorDataNewton, field_name)
 
 
@@ -491,9 +490,9 @@ def _backend_cases(gravity: tuple[float, float, float]) -> dict[str, tuple[type,
 
     dt = 1.0 / 120.0
     return {
-        "physx": (MultirotorPhysx, SimulationCfg(dt=dt, gravity=gravity)),
+        "physx": (Multirotor, SimulationCfg(dt=dt, gravity=gravity)),
         "newton": (
-            MultirotorNewton,
+            Multirotor,
             SimulationCfg(dt=dt, gravity=gravity, physics=NewtonCfg(solver_cfg=MJWarpSolverCfg())),
         ),
     }
