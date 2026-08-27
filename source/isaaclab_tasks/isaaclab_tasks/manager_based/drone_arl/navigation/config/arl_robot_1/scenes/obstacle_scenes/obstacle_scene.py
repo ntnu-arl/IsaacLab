@@ -25,58 +25,86 @@ OBSTACLE_SCENE_CFG = ObstaclesSceneCfg(
 )
 
 
-def generate_obstacle_collection(cfg: ObstaclesSceneCfg) -> RigidObjectCollectionCfg:
+def generate_obstacle_collection(cfg: ObstaclesSceneCfg, kinematic: bool = False) -> RigidObjectCollectionCfg:
     """Generate a rigid object collection configuration for walls and obstacles.
 
     Creates a complete scene with boundary walls and a variety of floating obstacles
     (panels, cubes, rods, etc.) based on the provided configuration. Each obstacle is
     assigned random colors and configured with appropriate physics properties.
 
-    Wall objects are configured with very high mass (10^7 kg) and high damping to remain
-    stationary during collisions. Obstacle objects have moderate mass (100 kg) to move in the right position if reset
-    in collision.
+    PhysX uses the task's original massive, velocity-limited rigid bodies. Newton can use
+    kinematic bodies to represent the same stationary geometry without the numerically
+    problematic mass and damping values.
 
     Args:
         cfg: Configuration object specifying obstacle types, sizes, quantities, and
             positioning constraints.
+        kinematic: Whether to represent walls and obstacles as kinematic bodies.
 
     Returns:
         A RigidObjectCollectionCfg containing all wall and obstacle configurations,
         ready to be added to a scene.
 
     Note:
-        All obstacles are initially placed at origin [0, 0, 0]. Actual positions are
-        set during environment reset via :func:`reset_obstacles_with_individual_ranges`.
+        Objects are initially parked at distinct positions below the scene so the physics
+        solver never observes overlapping geometry before the reset event places them.
+        All collection members live under the ``Obstacles`` prim so the collection's
+        combined path pattern cannot also match sibling assets such as the robot.
     """
     max_num_obstacles = cfg.max_num_obstacles
 
     rigid_objects = {}
 
+    if kinematic:
+        wall_rigid_props = sim_utils.RigidBodyPropertiesCfg(
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=0,
+            disable_gravity=True,
+            kinematic_enabled=True,
+        )
+        wall_mass_props = None
+        obstacle_rigid_props = wall_rigid_props
+        obstacle_mass_props = None
+    else:
+        wall_rigid_props = sim_utils.RigidBodyPropertiesCfg(
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=0,
+            disable_gravity=True,
+            kinematic_enabled=False,
+            linear_damping=9999.0,
+            angular_damping=9999.0,
+            max_linear_velocity=0.0,
+            max_angular_velocity=0.0,
+        )
+        wall_mass_props = sim_utils.MassPropertiesCfg(mass=10000000.0)
+        obstacle_rigid_props = sim_utils.RigidBodyPropertiesCfg(
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=0,
+            disable_gravity=True,
+            kinematic_enabled=False,
+            linear_damping=1.0,
+            angular_damping=1.0,
+            max_linear_velocity=0.0,
+            max_angular_velocity=0.0,
+        )
+        obstacle_mass_props = sim_utils.MassPropertiesCfg(mass=100.0)
+
     for wall_name, wall_cfg in cfg.wall_cfgs.items():
-        # Walls get their specific size and default center
-        default_center = [0.0, 0.0, 0.0]  # Will be set properly at reset
+        center_ratio = np.asarray(wall_cfg.center_ratio_min)
+        default_center = (center_ratio - 0.5) * np.asarray(cfg.env_size)
+        default_center[2] += cfg.ground_offset
         color = float(np.random.randint(0, 256, dtype=np.uint8)) / 255.0
 
         rigid_objects[wall_name] = RigidObjectCfg(
-            prim_path=f"{{ENV_REGEX_NS}}/obstacle_{wall_name}",
+            prim_path=f"{{ENV_REGEX_NS}}/Obstacles/obstacle_{wall_name}",
             spawn=sim_utils.CuboidCfg(
                 size=wall_cfg.size,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, color), metallic=0.2),
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    solver_position_iteration_count=4,
-                    solver_velocity_iteration_count=0,
-                    disable_gravity=True,
-                    kinematic_enabled=False,
-                    linear_damping=9999.0,
-                    angular_damping=9999.0,
-                    max_linear_velocity=0.0,
-                    max_angular_velocity=0.0,
-                ),
-                # mass of walls needs to be way larger than weight of obstacles to make them not move during reset
-                mass_props=sim_utils.MassPropertiesCfg(mass=10000000.0),
+                rigid_props=wall_rigid_props,
+                mass_props=wall_mass_props,
                 collision_props=sim_utils.CollisionPropertiesCfg(),
             ),
-            init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(default_center)),
+            init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(default_center.tolist())),
             collision_group=0,
         )
 
@@ -85,26 +113,17 @@ def generate_obstacle_collection(cfg: ObstaclesSceneCfg) -> RigidObjectCollectio
         obj_name = f"obstacle_{i}"
         obs_cfg = obstacle_types[i % len(obstacle_types)]
 
-        default_center = [0.0, 0.0, 0.0]
+        default_center = [0.0, 0.0, -1000.0 - 10.0 * (len(cfg.wall_cfgs) + i)]
         color = np.random.randint(0, 256, size=3, dtype=np.uint8)
         color_normalized = tuple(float(c) / 255.0 for c in color)
 
         rigid_objects[obj_name] = RigidObjectCfg(
-            prim_path=f"{{ENV_REGEX_NS}}/{obj_name}",
+            prim_path=f"{{ENV_REGEX_NS}}/Obstacles/{obj_name}",
             spawn=sim_utils.CuboidCfg(
                 size=obs_cfg.size,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color_normalized, metallic=0.2),
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    solver_position_iteration_count=4,
-                    solver_velocity_iteration_count=0,
-                    disable_gravity=True,
-                    kinematic_enabled=False,
-                    linear_damping=1.0,
-                    angular_damping=1.0,
-                    max_linear_velocity=0.0,
-                    max_angular_velocity=0.0,
-                ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=100.0),
+                rigid_props=obstacle_rigid_props,
+                mass_props=obstacle_mass_props,
                 collision_props=sim_utils.CollisionPropertiesCfg(),
             ),
             init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(default_center)),

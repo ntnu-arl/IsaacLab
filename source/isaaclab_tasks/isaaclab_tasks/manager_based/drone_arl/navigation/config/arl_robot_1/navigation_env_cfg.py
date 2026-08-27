@@ -7,6 +7,12 @@ import logging
 import math
 from dataclasses import MISSING
 
+from isaaclab_newton.physics import (
+    MJWarpSolverCfg,
+    NewtonCfg,
+    NewtonCollisionPipelineCfg,
+    NewtonShapeCfg,
+)
 from isaaclab_physx.physics import PhysxCfg
 
 import isaaclab.sim as sim_utils
@@ -44,6 +50,7 @@ from isaaclab_tasks.manager_based.drone_arl.mdp.rewards import (
     distance_to_goal_exp_curriculum,
     velocity_to_goal_reward_curriculum,
 )
+from isaaclab_tasks.utils import PresetCfg
 
 logging.getLogger("isaaclab.sensors.ray_caster.multi_mesh_ray_caster").setLevel(logging.WARNING)
 
@@ -57,6 +64,81 @@ from .scenes.obstacle_scenes.obstacle_scene import (
 
 
 ##
+# Physics presets
+##
+
+
+@configclass
+class NavigationPhysicsCfg(PresetCfg):
+    """Physics backends supported by the ARL navigation task."""
+
+    default = PhysxCfg(gpu_max_rigid_patch_count=2**21)
+    newton_mjwarp = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            njmax=768,
+            nconmax=128,
+            cone="elliptic",
+            impratio=100,
+            integrator="implicitfast",
+            use_mujoco_contacts=False,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(max_triangle_pairs=2_500_000),
+        default_shape_cfg=NewtonShapeCfg(margin=0.01),
+    )
+    physx = default
+
+
+_DEPTH_CAMERA_CFG = MultiMeshRayCasterCameraCfg(
+    prim_path="{ENV_REGEX_NS}/Robot/base_link",
+    mesh_prim_paths=[
+        MultiMeshRayCasterCameraCfg.RaycastTargetCfg(
+            prim_expr=f"{{ENV_REGEX_NS}}/Obstacles/obstacle_{wall_name}", is_shared=False, track_mesh_transforms=True
+        )
+        for wall_name, _ in OBSTACLE_SCENE_CFG.wall_cfgs.items()
+    ]
+    + [
+        MultiMeshRayCasterCameraCfg.RaycastTargetCfg(
+            prim_expr=f"{{ENV_REGEX_NS}}/Obstacles/obstacle_{i}", is_shared=False, track_mesh_transforms=True
+        )
+        for i in range(OBSTACLE_SCENE_CFG.max_num_obstacles)
+    ],
+    offset=MultiMeshRayCasterCameraCfg.OffsetCfg(
+        pos=(0.15, 0.0, 0.04), rot=(1.0, 0.0, 0.0, 0.0), convention="world"
+    ),
+    update_period=0.1,
+    pattern_cfg=PinholeCameraPatternCfg(
+        width=480, height=270, focal_length=0.193, horizontal_aperture=0.36, vertical_aperture=0.21
+    ),
+    data_types=["distance_to_image_plane"],
+    max_distance=10.0,
+    depth_clipping_behavior="max",
+)
+
+
+@configclass
+class NavigationDepthCameraCfg(PresetCfg):
+    """Depth-camera implementations supported by the ARL navigation task."""
+
+    default = _DEPTH_CAMERA_CFG
+    newton_mjwarp = _DEPTH_CAMERA_CFG.replace(
+        class_type=(
+            "isaaclab_tasks.manager_based.drone_arl.navigation.config.arl_robot_1.newton_camera:"
+            "ArlNewtonMultiMeshRayCasterCamera"
+        )
+    )
+    physx = default
+
+
+@configclass
+class NavigationObstacleCollectionCfg(PresetCfg):
+    """Backend representations of the shared navigation obstacle scene."""
+
+    default = generate_obstacle_collection(OBSTACLE_SCENE_CFG)
+    newton_mjwarp = generate_obstacle_collection(OBSTACLE_SCENE_CFG, kinematic=True)
+    physx = default
+
+
+##
 # Scene definition
 ##
 @configclass
@@ -64,37 +146,13 @@ class ArlNavigationSceneCfg(InteractiveSceneCfg):
     """Scene configuration for drone navigation with obstacles."""
 
     # obstacles
-    object_collection = generate_obstacle_collection(OBSTACLE_SCENE_CFG)
+    object_collection = NavigationObstacleCollectionCfg()
 
     # robots
     robot: MultirotorCfg = MISSING
 
     # sensors
-    depth_camera = MultiMeshRayCasterCameraCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/base_link",
-        mesh_prim_paths=[
-            MultiMeshRayCasterCameraCfg.RaycastTargetCfg(
-                prim_expr=f"{{ENV_REGEX_NS}}/obstacle_{wall_name}", is_shared=False, track_mesh_transforms=True
-            )
-            for wall_name, _ in OBSTACLE_SCENE_CFG.wall_cfgs.items()
-        ]
-        + [
-            MultiMeshRayCasterCameraCfg.RaycastTargetCfg(
-                prim_expr=f"{{ENV_REGEX_NS}}/obstacle_{i}", is_shared=False, track_mesh_transforms=True
-            )
-            for i in range(OBSTACLE_SCENE_CFG.max_num_obstacles)
-        ],
-        offset=MultiMeshRayCasterCameraCfg.OffsetCfg(
-            pos=(0.15, 0.0, 0.04), rot=(1.0, 0.0, 0.0, 0.0), convention="world"
-        ),
-        update_period=0.1,
-        pattern_cfg=PinholeCameraPatternCfg(
-            width=480, height=270, focal_length=0.193, horizontal_aperture=0.36, vertical_aperture=0.21
-        ),
-        data_types=["distance_to_image_plane"],
-        max_distance=10.0,
-        depth_clipping_behavior="max",
-    )
+    depth_camera = NavigationDepthCameraCfg()
 
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*",
@@ -328,6 +386,7 @@ class NavigationVelocityFloatingObstacleEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 10
         self.episode_length_s = 10.0
+
         # simulation settings
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation
@@ -337,7 +396,8 @@ class NavigationVelocityFloatingObstacleEnvCfg(ManagerBasedRLEnvCfg):
             static_friction=1.0,
             dynamic_friction=1.0,
         )
-        self.sim.physics = PhysxCfg(gpu_max_rigid_patch_count=2**21)
+        self.sim.physics = NavigationPhysicsCfg()
+
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.contact_forces is not None:

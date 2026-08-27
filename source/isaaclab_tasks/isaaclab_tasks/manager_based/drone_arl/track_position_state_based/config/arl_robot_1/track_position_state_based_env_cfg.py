@@ -6,6 +6,7 @@
 import math
 from dataclasses import MISSING
 
+from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 
 import isaaclab.sim as sim_utils
@@ -18,6 +19,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sim import SimulationCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
@@ -32,6 +34,32 @@ from isaaclab_tasks.manager_based.drone_arl.mdp.rewards import (
     lin_vel_xyz_exp,
     yaw_aligned,
 )
+from isaaclab_tasks.utils import PresetCfg
+
+
+##
+# Physics presets
+##
+
+
+@configclass
+class TrackPositionPhysicsCfg(PresetCfg):
+    """Physics backends supported by the ARL position-tracking task."""
+
+    default = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    newton_mjwarp = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            njmax=120,
+            nconmax=15,
+            cone="elliptic",
+            impratio=100,
+            integrator="implicitfast",
+        ),
+        num_substeps=1,
+        debug_mode=False,
+        use_cuda_graph=True,
+    )
+    physx = default
 
 
 ##
@@ -226,6 +254,7 @@ class TrackPositionNoObstaclesEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 10
         self.episode_length_s = 5.0
+
         # simulation settings
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation
@@ -235,4 +264,4 @@ class TrackPositionNoObstaclesEnvCfg(ManagerBasedRLEnvCfg):
             static_friction=1.0,
             dynamic_friction=1.0,
         )
-        self.sim.physics = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+        self.sim.physics = TrackPositionPhysicsCfg()

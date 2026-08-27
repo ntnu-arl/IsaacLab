@@ -40,8 +40,8 @@ def reset_obstacles_with_individual_ranges(
 
     Walls are positioned at fixed locations based on their configuration ratios. Obstacles
     are randomly placed within their designated zones, with the number of active obstacles
-    determined by the curriculum difficulty level. Inactive obstacles are moved far below
-    the scene (-1000m in Z) to effectively remove them from the environment.
+    determined by the curriculum difficulty level. Inactive obstacles are parked at distinct
+    locations far below the scene to avoid overlapping collision geometry.
 
     The curriculum scaling works as:
         num_obstacles = min + (difficulty / max_difficulty) * (max - min)
@@ -70,9 +70,9 @@ def reset_obstacles_with_individual_ranges(
     """
     obstacles: RigidObjectCollection = env.scene[asset_cfg.name]
 
-    num_objects = obstacles.num_objects
+    num_objects = obstacles.num_bodies
     num_envs = len(env_ids)
-    object_names = obstacles.object_names
+    object_names = obstacles.body_names
 
     # Get difficulty levels per environment
     if use_curriculum:
@@ -101,89 +101,84 @@ def reset_obstacles_with_individual_ranges(
     wall_names = list(wall_configs.keys())
     obstacle_types = list(obstacle_configs.values())
     env_size_t = torch.tensor(env_size, device=env.device)
+    identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=env.device)
+    all_poses[..., 3:7] = identity_quat
 
-    # place walls
-    for wall_name, wall_cfg in wall_configs.items():
-        if wall_name in object_names:
-            wall_idx = object_names.index(wall_name)
-
-            min_ratio = torch.tensor(wall_cfg.center_ratio_min, device=env.device)
-            max_ratio = torch.tensor(wall_cfg.center_ratio_max, device=env.device)
-
-            if torch.allclose(min_ratio, max_ratio):
-                center_ratios = min_ratio.unsqueeze(0).repeat(num_envs, 1)
-            else:
-                ratios = torch.rand(num_envs, 3, device=env.device)
-                center_ratios = ratios * (max_ratio - min_ratio) + min_ratio
-
-            positions = (center_ratios - 0.5) * env_size_t
-            positions[:, 2] += ground_offset
-            positions += env.scene.env_origins[env_ids]
-
-            all_poses[:, wall_idx, 0:3] = positions
-            all_poses[:, wall_idx, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=env.device).repeat(num_envs, 1)
+    # Place walls
+    wall_entries = [(object_names.index(name), cfg) for name, cfg in wall_configs.items() if name in object_names]
+    if wall_entries:
+        wall_indices = [entry[0] for entry in wall_entries]
+        wall_min_ratios = torch.tensor(
+            [entry[1].center_ratio_min for entry in wall_entries], dtype=torch.float32, device=env.device
+        )
+        wall_max_ratios = torch.tensor(
+            [entry[1].center_ratio_max for entry in wall_entries], dtype=torch.float32, device=env.device
+        )
+        wall_center_ratios = wall_min_ratios.unsqueeze(0).expand(num_envs, -1, -1).clone()
+        variable_wall_indices = [
+            i
+            for i, (_, wall_cfg) in enumerate(wall_entries)
+            if wall_cfg.center_ratio_min != wall_cfg.center_ratio_max
+        ]
+        if variable_wall_indices:
+            wall_ratios = torch.rand(num_envs, len(variable_wall_indices), 3, device=env.device)
+            wall_center_ratios[:, variable_wall_indices] = (
+                wall_ratios
+                * (wall_max_ratios[variable_wall_indices] - wall_min_ratios[variable_wall_indices])
+                + wall_min_ratios[variable_wall_indices]
+            )
+        wall_positions = (wall_center_ratios - 0.5) * env_size_t
+        wall_positions[..., 2] += ground_offset
+        wall_positions += env.scene.env_origins[env_ids].unsqueeze(1)
+        all_poses[:, wall_indices, 0:3] = wall_positions
 
     # Get obstacle indices
     obstacle_indices = [idx for idx, name in enumerate(object_names) if name not in wall_names]
 
     if len(obstacle_indices) == 0:
-        obstacles.write_object_pose_to_sim(all_poses, env_ids=env_ids)
-        obstacles.write_object_velocity_to_sim(all_velocities, env_ids=env_ids)
+        obstacles.write_body_pose_to_sim_index(body_poses=all_poses, env_ids=env_ids)
+        obstacles.write_body_com_velocity_to_sim_index(body_velocities=all_velocities, env_ids=env_ids)
         return
 
-    # Determine which obstacles are active per env
-    active_masks = torch.zeros(num_envs, len(obstacle_indices), dtype=torch.bool, device=env.device)
-    for env_idx in range(num_envs):
-        num_active = obstacles_per_env[env_idx].item()
-        perm = torch.randperm(len(obstacle_indices), device=env.device)[:num_active]
-        active_masks[env_idx, perm] = True
+    num_obstacles = len(obstacle_indices)
 
-    # place obstacles
-    for obj_list_idx in range(len(obstacle_indices)):
-        obj_idx = obstacle_indices[obj_list_idx]
+    # Select the requested number of unique obstacles per environment
+    random_order = torch.argsort(torch.rand(num_envs, num_obstacles, device=env.device), dim=1)
+    active_by_rank = torch.arange(num_obstacles, device=env.device).unsqueeze(0) < obstacles_per_env.unsqueeze(1)
+    active_masks = torch.zeros(num_envs, num_obstacles, dtype=torch.bool, device=env.device)
+    active_masks.scatter_(1, random_order, active_by_rank)
 
-        # Which envs need this obstacle?
-        envs_need_obstacle = active_masks[:, obj_list_idx]
+    # Sample every obstacle in one operation.
+    obstacle_min_ratios = torch.tensor(
+        [obstacle_types[i % len(obstacle_types)].center_ratio_min for i in range(num_obstacles)],
+        dtype=torch.float32,
+        device=env.device,
+    )
+    obstacle_max_ratios = torch.tensor(
+        [obstacle_types[i % len(obstacle_types)].center_ratio_max for i in range(num_obstacles)],
+        dtype=torch.float32,
+        device=env.device,
+    )
+    obstacle_ratios = torch.rand(num_envs, num_obstacles, 3, device=env.device)
+    obstacle_positions = (
+        obstacle_ratios * (obstacle_max_ratios - obstacle_min_ratios) + obstacle_min_ratios - 0.5
+    ) * env_size_t
+    obstacle_positions[..., 2] += ground_offset
+    obstacle_positions += env.scene.env_origins[env_ids].unsqueeze(1)
 
-        if not envs_need_obstacle.any():
-            # Move all to -1000
-            all_poses[:, obj_idx, 0:3] = env.scene.env_origins[env_ids] + torch.tensor(
-                [0.0, 0.0, -1000.0], device=env.device
-            )
-            all_poses[:, obj_idx, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=env.device)
-            continue
+    # Inactive samples are discarded
+    inactive_positions = env.scene.env_origins[env_ids].unsqueeze(1).expand(-1, num_obstacles, -1).clone()
+    inactive_positions[..., 2] += -1000.0 - 5.0 * torch.arange(num_obstacles, device=env.device)
+    obstacle_positions = torch.where(active_masks.unsqueeze(-1), obstacle_positions, inactive_positions)
 
-        # Get obstacle config
-        config_idx = obj_list_idx % len(obstacle_types)
-        obs_cfg = obstacle_types[config_idx]
+    obstacle_quats = math_utils.random_orientation(num_envs * num_obstacles, device=env.device).view(
+        num_envs, num_obstacles, 4
+    )
+    obstacle_quats = torch.where(active_masks.unsqueeze(-1), obstacle_quats, identity_quat)
 
-        min_ratio = torch.tensor(obs_cfg.center_ratio_min, device=env.device)
-        max_ratio = torch.tensor(obs_cfg.center_ratio_max, device=env.device)
-
-        # sample object positions
-        num_active_envs = envs_need_obstacle.sum().item()
-        ratios = torch.rand(num_active_envs, 3, device=env.device)
-        positions = (ratios * (max_ratio - min_ratio) + min_ratio - 0.5) * env_size_t
-        positions[:, 2] += ground_offset
-
-        # Add env origins
-        active_env_indices = torch.where(envs_need_obstacle)[0]
-        positions += env.scene.env_origins[env_ids[active_env_indices]]
-
-        # Generate quaternions
-        quats = math_utils.random_orientation(num_envs, device=env.device)
-
-        # Write poses
-        all_poses[envs_need_obstacle, obj_idx, 0:3] = positions
-        all_poses[envs_need_obstacle, obj_idx, 3:7] = quats[envs_need_obstacle]
-
-        # Move inactive obstacles far away
-        inactive = ~envs_need_obstacle
-        all_poses[inactive, obj_idx, 0:3] = env.scene.env_origins[env_ids[inactive]] + torch.tensor(
-            [0.0, 0.0, -1000.0], device=env.device
-        )
-        all_poses[inactive, obj_idx, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=env.device)
+    all_poses[:, obstacle_indices, 0:3] = obstacle_positions
+    all_poses[:, obstacle_indices, 3:7] = obstacle_quats
 
     # Write to sim
-    obstacles.write_object_pose_to_sim(all_poses, env_ids=env_ids)
-    obstacles.write_object_velocity_to_sim(all_velocities, env_ids=env_ids)
+    obstacles.write_body_pose_to_sim_index(body_poses=all_poses, env_ids=env_ids)
+    obstacles.write_body_com_velocity_to_sim_index(body_velocities=all_velocities, env_ids=env_ids)
